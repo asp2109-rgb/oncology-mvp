@@ -45,3 +45,5 @@ data/oncology.db
 data/oncology.db-shm
 data/oncology.db-wal
 !data/oncology.deploy.db
+data/oncology.deploy.db-shm
+data/oncology.deploy.db-wal
