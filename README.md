@@ -53,7 +53,7 @@ npm run dev
 
 ```bash
 OPENAI_API_KEY=...
-OPENAI_MODEL=gpt-5.2
+OPENAI_MODEL=gpt-4o-mini
 ONCO_DB_PATH=/absolute/path/to/oncology.db
 PUBLIC_DEMO_URL=https://your-demo-url
 PUBLIC_DOCS_URL=https://your-docs-url
@@ -101,7 +101,7 @@ ONCO_KEEP_GUIDELINES=18 npm run db:prepare-deploy
 3. На Render создайте сервис через Blueprint из репозитория (файл `render.yaml` применится автоматически).
 4. При необходимости добавьте в Environment:
 - `OPENAI_API_KEY` (обязателен для patient-mode)
-- `OPENAI_MODEL` (по умолчанию `gpt-5.2`)
+- `OPENAI_MODEL` (по умолчанию `gpt-4o-mini`)
 
 ## Артефакты
 

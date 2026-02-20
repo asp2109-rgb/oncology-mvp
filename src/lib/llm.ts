@@ -72,7 +72,7 @@ async function callOpenAi(
     throw new Error("OPENAI_API_KEY не задан. Patient-режим работает только через LLM.");
   }
 
-  const model = process.env.OPENAI_MODEL ?? "gpt-5.2";
+  const model = process.env.OPENAI_MODEL ?? "gpt-4o-mini";
 
   const prompt = `
 Ты медицинский AI-ассистент для пациента. Объясняй просто, но без назначения лечения.

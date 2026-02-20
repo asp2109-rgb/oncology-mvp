@@ -13,7 +13,7 @@ export async function GET() {
     timestamp: new Date().toISOString(),
     counts,
     llm_enabled: Boolean(process.env.OPENAI_API_KEY),
-    llm_model: process.env.OPENAI_MODEL ?? "gpt-5.2",
+    llm_model: process.env.OPENAI_MODEL ?? "gpt-4o-mini",
     patient_explanation_mode: "llm_only",
   });
 }
