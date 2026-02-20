@@ -280,7 +280,7 @@ export default function DoctorPage() {
 
       <SectionCard
         title="Результат валидации"
-        subtitle="Rule-based проверка + заключение LLM для врача"
+        subtitle="Гибридная проверка и итоговое заключение RAG+KAG для врача"
       >
         {!result ? (
           <p className="text-sm text-[#afcae4]">Запустите проверку кейса, чтобы увидеть структурированный результат.</p>
@@ -294,14 +294,14 @@ export default function DoctorPage() {
             </div>
 
             <div className="rounded-2xl border border-[#2d4c6f] bg-[#0c2036] p-4 text-sm text-[#d8eeff]">
-              <p className="text-xs uppercase tracking-[0.14em] text-[#89b1d8]">LLM-проверка</p>
-              <p className="mt-2">
-                {humanizeLlmVerdict(result.llm_review.verdict)} | {result.llm_review.provider} / {result.llm_review.model}
-              </p>
+              <p className="text-xs uppercase tracking-[0.14em] text-[#89b1d8]">Заключение (RAG+KAG)</p>
+              <p className="mt-2 font-semibold text-[#dbf3ff]">{humanizeLlmVerdict(result.llm_review.verdict)}</p>
+              <p className="mt-2 leading-6 text-[#e3f5ff]">{result.llm_review.final_conclusion}</p>
+              <p className="mt-3 text-xs uppercase tracking-[0.12em] text-[#9fc3e6]">Техническое обоснование</p>
+              <p className="mt-1 leading-6">{result.llm_review.clinical_rationale}</p>
               {result.llm_review.response_id ? (
                 <p className="mt-1 text-[11px] text-[#8fb6dd]">response_id: {result.llm_review.response_id}</p>
               ) : null}
-              <p className="mt-2 leading-6">{result.llm_review.clinical_rationale}</p>
 
               {result.llm_review.critical_risks.length > 0 ? (
                 <div className="mt-3">
@@ -322,6 +322,47 @@ export default function DoctorPage() {
                       <li key={item}>{item}</li>
                     ))}
                   </ul>
+                </div>
+              ) : null}
+
+              {result.llm_review.citations.length > 0 ? (
+                <div className="mt-3">
+                  <p className="text-xs uppercase tracking-[0.12em] text-[#9fc3e6]">RAG-цитаты</p>
+                  <div className="mt-2 space-y-2">
+                    {result.llm_review.citations.map((citation) => (
+                      <div
+                        key={citation.chunk_id}
+                        className="rounded-xl border border-[#2c4d70] bg-[#0d2138]/95 p-3"
+                      >
+                        <p className="text-xs text-[#9fc2e3]">
+                          {citation.guideline_name} · {citation.section_title}
+                        </p>
+                        <p className="mt-1 text-sm leading-6 text-[#d3ebff]">{citation.excerpt}</p>
+                        <div className="mt-2 flex gap-3 text-xs">
+                          {citation.source_url ? (
+                            <a
+                              className="text-[#83dff8] hover:underline"
+                              href={citation.source_url}
+                              target="_blank"
+                              rel="noreferrer"
+                            >
+                              источник
+                            </a>
+                          ) : null}
+                          {citation.pdf_url ? (
+                            <a
+                              className="text-[#83dff8] hover:underline"
+                              href={citation.pdf_url}
+                              target="_blank"
+                              rel="noreferrer"
+                            >
+                              pdf
+                            </a>
+                          ) : null}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               ) : null}
             </div>

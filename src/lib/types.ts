@@ -57,10 +57,22 @@ export type DoctorLlmReview = {
   provider: "openai";
   model: string;
   response_id: string | null;
+  method: "rag_kag";
   verdict: "confirmed" | "needs_attention";
+  final_conclusion: string;
   clinical_rationale: string;
   critical_risks: string[];
   additional_checks: string[];
+  citations: Array<{
+    chunk_id: string;
+    guideline_id: string;
+    guideline_name: string;
+    section_title: string;
+    source_anchor: string | null;
+    excerpt: string;
+    source_url: string;
+    pdf_url: string;
+  }>;
 };
 
 export type DoctorValidationResponse = ValidationResult & {

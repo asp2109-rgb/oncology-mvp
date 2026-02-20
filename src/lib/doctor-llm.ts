@@ -12,6 +12,15 @@ type ChatCompletionResponse = {
   };
 };
 
+type DoctorReviewPayload = {
+  verdict?: string;
+  final_conclusion?: string;
+  clinical_rationale?: string;
+  critical_risks?: unknown;
+  additional_checks?: unknown;
+  used_chunk_ids?: unknown;
+};
+
 function extractJsonObject(raw: string): string {
   const trimmed = raw.trim();
   if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
@@ -27,29 +36,151 @@ function extractJsonObject(raw: string): string {
   throw new Error("LLM вернула ответ не в JSON-формате");
 }
 
+function normalizeStringArray(input: unknown, limit: number): string[] {
+  if (!Array.isArray(input)) {
+    return [];
+  }
+
+  return input
+    .map((item) => String(item).trim())
+    .filter(Boolean)
+    .slice(0, limit);
+}
+
+function buildCitations(
+  validation: ValidationResult,
+  usedChunkIds: string[],
+): DoctorLlmReview["citations"] {
+  if (validation.evidence.length === 0) {
+    return [];
+  }
+
+  const evidenceById = new Map(validation.evidence.map((hit) => [hit.chunk_id, hit]));
+  const guidelineById = new Map(validation.applied_guideline_versions.map((item) => [item.id, item]));
+
+  const fallbackIds = validation.evidence.slice(0, 3).map((hit) => hit.chunk_id);
+  const selectedIds = Array.from(new Set([...usedChunkIds, ...fallbackIds]))
+    .filter((chunkId) => evidenceById.has(chunkId))
+    .slice(0, 5);
+
+  return selectedIds.map((chunkId) => {
+    const hit = evidenceById.get(chunkId);
+    if (!hit) {
+      return {
+        chunk_id: chunkId,
+        guideline_id: "",
+        guideline_name: "",
+        section_title: "",
+        source_anchor: null,
+        excerpt: "",
+        source_url: "",
+        pdf_url: "",
+      };
+    }
+
+    const guideline = guidelineById.get(hit.guideline_id);
+
+    return {
+      chunk_id: hit.chunk_id,
+      guideline_id: hit.guideline_id,
+      guideline_name: hit.guideline_name,
+      section_title: hit.section_title,
+      source_anchor: hit.source_anchor,
+      excerpt: hit.chunk_text.slice(0, 280),
+      source_url: guideline?.source_url ?? "",
+      pdf_url: guideline?.pdf_url ?? "",
+    };
+  });
+}
+
+function buildDoctorPrompt(caseInput: CaseInput, validation: ValidationResult): string {
+  const structuredSignals = {
+    diagnosis: caseInput.diagnosis,
+    stage: caseInput.stage,
+    biomarkers: caseInput.biomarkers,
+    as_of_date: caseInput.as_of_date,
+    current_plan: caseInput.current_plan.slice(0, 15),
+    rule_status: validation.status,
+    matches: validation.matches.slice(0, 12),
+    mismatches: validation.mismatches.slice(0, 12),
+    missing_actions: validation.missing_actions.slice(0, 12),
+    conflicts: validation.conflicts.slice(0, 12),
+    source_traceability_rate: validation.source_traceability_rate,
+    applied_guideline_versions: validation.applied_guideline_versions.map((item) => ({
+      id: item.id,
+      name: item.name,
+      publish_date: item.publish_date,
+      status: item.status,
+    })),
+  };
+
+  const ragEvidence = validation.evidence.slice(0, 12).map((hit) => ({
+    chunk_id: hit.chunk_id,
+    guideline_id: hit.guideline_id,
+    guideline_name: hit.guideline_name,
+    section_title: hit.section_title,
+    source_anchor: hit.source_anchor,
+    score: Number(hit.score.toFixed(4)),
+    excerpt: hit.chunk_text.slice(0, 520),
+  }));
+
+  return `
+Ты медицинский ассистент для врача.
+Сформируй итоговое заключение в формате RAG+KAG:
+- RAG: ссылайся только на фрагменты из блока rag_evidence;
+- KAG: учти структурированные сигналы из блока structured_signals.
+
+Верни строго JSON:
+{
+  "verdict": "confirmed" | "needs_attention",
+  "final_conclusion": "краткое итоговое заключение (2-4 предложения)",
+  "clinical_rationale": "техническое обоснование для врача",
+  "critical_risks": ["..."],
+  "additional_checks": ["..."],
+  "used_chunk_ids": ["chunk_id_1", "chunk_id_2"]
+}
+
+Ограничения:
+- не назначай лечение;
+- не выдумывай источники и chunk_id;
+- используй только chunk_id из rag_evidence;
+- не используй markdown.
+
+structured_signals:
+${JSON.stringify(structuredSignals, null, 2)}
+
+rag_evidence:
+${JSON.stringify(ragEvidence, null, 2)}
+  `.trim();
+}
+
 function normalizeReview(
-  parsed: Partial<DoctorLlmReview>,
+  parsed: DoctorReviewPayload,
   model: string,
   responseId: string | null,
+  validation: ValidationResult,
 ): DoctorLlmReview {
-  if (!parsed.clinical_rationale) {
-    throw new Error("LLM не вернула clinical_rationale");
+  const finalConclusion = String(parsed.final_conclusion ?? "").trim();
+  const clinicalRationale = String(parsed.clinical_rationale ?? "").trim();
+
+  if (!finalConclusion && !clinicalRationale) {
+    throw new Error("LLM не вернула final_conclusion или clinical_rationale");
   }
 
   const verdictRaw = parsed.verdict === "confirmed" ? "confirmed" : "needs_attention";
+  const usedChunkIds = normalizeStringArray(parsed.used_chunk_ids, 12);
 
   return {
     provider: "openai",
     model,
     response_id: responseId,
+    method: "rag_kag",
     verdict: verdictRaw,
-    clinical_rationale: parsed.clinical_rationale,
-    critical_risks: Array.isArray(parsed.critical_risks)
-      ? parsed.critical_risks.map((item) => String(item)).slice(0, 8)
-      : [],
-    additional_checks: Array.isArray(parsed.additional_checks)
-      ? parsed.additional_checks.map((item) => String(item)).slice(0, 8)
-      : [],
+    final_conclusion: finalConclusion || clinicalRationale,
+    clinical_rationale: clinicalRationale || finalConclusion,
+    critical_risks: normalizeStringArray(parsed.critical_risks, 8),
+    additional_checks: normalizeStringArray(parsed.additional_checks, 8),
+    citations: buildCitations(validation, usedChunkIds),
   };
 }
 
@@ -63,27 +194,7 @@ export async function buildDoctorLlmReview(
   }
 
   const model = process.env.OPENAI_MODEL ?? "gpt-4o-mini";
-
-  const prompt = `
-Ты медицинский ассистент для врача. Оцени результат rule-based проверки и верни JSON:
-{
-  "verdict": "confirmed" | "needs_attention",
-  "clinical_rationale": "короткое техническое обоснование",
-  "critical_risks": ["..."],
-  "additional_checks": ["..."]
-}
-
-Ограничения:
-- не назначай лечение,
-- анализируй только соответствие рекомендациям и риски несоответствий,
-- не используй markdown.
-
-Кейс:
-${JSON.stringify(caseInput, null, 2)}
-
-Результат rule-based:
-${JSON.stringify(validation, null, 2)}
-  `.trim();
+  const prompt = buildDoctorPrompt(caseInput, validation);
 
   const response = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
@@ -121,6 +232,6 @@ ${JSON.stringify(validation, null, 2)}
   }
 
   const jsonText = extractJsonObject(content);
-  const parsed = JSON.parse(jsonText) as Partial<DoctorLlmReview>;
-  return normalizeReview(parsed, model, payload.id ?? null);
+  const parsed = JSON.parse(jsonText) as DoctorReviewPayload;
+  return normalizeReview(parsed, model, payload.id ?? null, validation);
 }

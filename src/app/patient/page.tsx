@@ -18,7 +18,6 @@ type PatientApiResponse = {
   explanation: PatientExplanation;
   llm: {
     provider: string;
-    model: string;
     response_id: string | null;
   };
 };
@@ -129,9 +128,7 @@ export default function PatientPage() {
           <div className="space-y-5 text-sm text-[#d8eeff]">
             <div className="rounded-2xl border border-[#2d4c6f] bg-[#0c2036] p-4">
               <p className="text-xs uppercase tracking-[0.14em] text-[#89b1d8]">LLM сессия</p>
-              <p className="mt-2 text-xs text-[#b8d5ef]">
-                Провайдер: {response.llm.provider} | Модель: {response.llm.model}
-              </p>
+              <p className="mt-2 text-xs text-[#b8d5ef]">Провайдер: {response.llm.provider}</p>
               {response.llm.response_id ? (
                 <p className="mt-1 text-[11px] text-[#8fb6dd]">response_id: {response.llm.response_id}</p>
               ) : null}
