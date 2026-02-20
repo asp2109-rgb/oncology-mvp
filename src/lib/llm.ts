@@ -51,7 +51,7 @@ async function callOpenAi(
     return null;
   }
 
-  const model = process.env.OPENAI_MODEL ?? "gpt-4.1-mini";
+  const model = process.env.OPENAI_MODEL ?? "gpt-5.2-mini";
 
   const prompt = `
 Ты медицинский AI-ассистент для пациента. Объясняй просто, но без назначения лечения.

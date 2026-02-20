@@ -53,7 +53,7 @@ npm run dev
 
 ```bash
 OPENAI_API_KEY=...
-OPENAI_MODEL=gpt-4.1-mini
+OPENAI_MODEL=gpt-5.2-mini
 ONCO_DB_PATH=/absolute/path/to/oncology.db
 PUBLIC_DEMO_URL=https://your-demo-url
 PUBLIC_DOCS_URL=https://your-docs-url
