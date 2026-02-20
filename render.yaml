@@ -15,5 +15,7 @@ services:
         value: 22
       - key: ONCO_DB_PATH
         value: data/oncology.deploy.db
+      - key: OPENAI_API_KEY
+        sync: false
       - key: OPENAI_MODEL
-        value: gpt-5.2-mini
+        value: gpt-5.2

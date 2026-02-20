@@ -16,6 +16,11 @@ function linesToArray(text: string): string[] {
 type PatientApiResponse = {
   validation: ValidationResult;
   explanation: PatientExplanation;
+  llm: {
+    provider: string;
+    model: string;
+    response_id: string | null;
+  };
 };
 
 export default function PatientPage() {
@@ -116,12 +121,22 @@ export default function PatientPage() {
 
       <SectionCard
         title="Результат объяснения"
-        subtitle="При отсутствии ключа LLM используется полностью детерминированный fallback"
+        subtitle="Ответ формируется через OpenAI LLM на основании текущего кейса и найденных источников"
       >
         {!response ? (
-          <p className="text-sm text-[#afcae4]">Запустите ассистента, чтобы сформировать объяснение.</p>
+          <p className="text-sm text-[#afcae4]">Запустите ассистента, чтобы получить ответ LLM в пациентском формате.</p>
         ) : (
           <div className="space-y-5 text-sm text-[#d8eeff]">
+            <div className="rounded-2xl border border-[#2d4c6f] bg-[#0c2036] p-4">
+              <p className="text-xs uppercase tracking-[0.14em] text-[#89b1d8]">LLM сессия</p>
+              <p className="mt-2 text-xs text-[#b8d5ef]">
+                Провайдер: {response.llm.provider} | Модель: {response.llm.model}
+              </p>
+              {response.llm.response_id ? (
+                <p className="mt-1 text-[11px] text-[#8fb6dd]">response_id: {response.llm.response_id}</p>
+              ) : null}
+            </div>
+
             <div className="rounded-2xl border border-[#2d4c6f] bg-[#0c2036] p-4">
               <p className="text-xs uppercase tracking-[0.14em] text-[#89b1d8]">Кратко</p>
               <p className="mt-2 leading-6">{response.explanation.plain_summary}</p>

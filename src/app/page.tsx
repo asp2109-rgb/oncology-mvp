@@ -42,7 +42,7 @@ export default function HomePage() {
 
         <div className="relative z-10 max-w-4xl space-y-5">
           <p className="w-fit rounded-full border border-[#3a597d] bg-[#0a1e35] px-3 py-1 text-xs uppercase tracking-[0.18em] text-[#7ce4d9]">
-            Готовый каркас MVP
+            Пилотная версия
           </p>
 
           <h1 className="text-3xl font-semibold tracking-tight text-[#f2fbff] md:text-5xl">
@@ -50,8 +50,8 @@ export default function HomePage() {
           </h1>
 
           <p className="max-w-3xl text-sm text-[#c6ddf3] md:text-base">
-            Next.js fullstack + SQLite FTS5 + модульные провайдеры поиска. Ретроспективная проверка по правилам
-            работает без LLM; при наличии API-ключа подключается LLM-слой для объяснений пациенту.
+            Платформа автоматически сопоставляет клинический кейс с рекомендациями и формирует отчёт для врача.
+            В пациентском режиме объяснение генерируется через OpenAI LLM с прозрачной ссылкой на источники.
           </p>
 
           <div className="flex flex-wrap gap-3 text-xs text-[#d3ebff] md:text-sm">

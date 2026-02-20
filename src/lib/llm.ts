@@ -1,57 +1,78 @@
 import type { CaseInput, PatientExplanation, ValidationResult } from "@/lib/types";
 
 type ChatCompletionResponse = {
+  id?: string;
   choices?: Array<{
     message?: {
       content?: string;
     };
   }>;
+  error?: {
+    message?: string;
+  };
 };
 
-function fallbackPatientExplanation(
-  caseInput: CaseInput,
+function getDefaultSources(validation: ValidationResult): PatientExplanation["sources"] {
+  return validation.applied_guideline_versions.map((item) => ({
+    guideline_id: item.id,
+    guideline_name: item.name,
+    source_url: item.source_url,
+    pdf_url: item.pdf_url,
+  }));
+}
+
+function extractJsonObject(raw: string): string {
+  const trimmed = raw.trim();
+  if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
+    return trimmed;
+  }
+
+  const start = trimmed.indexOf("{");
+  const end = trimmed.lastIndexOf("}");
+  if (start >= 0 && end > start) {
+    return trimmed.slice(start, end + 1);
+  }
+
+  throw new Error("LLM вернула ответ не в JSON-формате");
+}
+
+function normalizeExplanation(
+  parsed: Partial<PatientExplanation>,
   validation: ValidationResult,
 ): PatientExplanation {
-  const statusText =
-    validation.status === "compliant"
-      ? "Текущий план в целом совпадает с рекомендациями, но финальное решение принимает лечащий врач."
-      : "Есть пункты, которые требуют дополнительной проверки врачом по клиническим рекомендациям.";
-
-  const mismatchText = validation.mismatches.length
-    ? `Пункты для уточнения: ${validation.mismatches.join(", ")}.`
-    : "Критичных несовпадений в переданном плане не найдено.";
-
-  const missingText = validation.missing_actions.length
-    ? `В рекомендациях дополнительно встречаются шаги: ${validation.missing_actions.slice(0, 3).join("; ")}.`
-    : "Дополнительные обязательные шаги не выделены автоматически.";
+  if (!parsed.plain_summary || !parsed.why_this_is_recommended) {
+    throw new Error("LLM вернула неполный JSON-ответ");
+  }
 
   return {
-    plain_summary: `Диагноз: ${caseInput.diagnosis}. ${statusText} ${mismatchText}`,
-    why_this_is_recommended: `${missingText} Проверка выполнена по версиям клинических рекомендаций, действовавшим на дату ${caseInput.as_of_date}.`,
-    questions_for_doctor: [
-      "Какие пункты моего текущего плана являются приоритетными прямо сейчас?",
-      "Есть ли обследования или анализы, которые нужно добавить на этом этапе?",
-      "Какие риски и побочные эффекты наиболее важны именно в моей ситуации?",
-    ],
-    sources: validation.applied_guideline_versions.map((item) => ({
-      guideline_id: item.id,
-      guideline_name: item.name,
-      source_url: item.source_url,
-      pdf_url: item.pdf_url,
-    })),
+    plain_summary: parsed.plain_summary,
+    why_this_is_recommended: parsed.why_this_is_recommended,
+    questions_for_doctor: Array.isArray(parsed.questions_for_doctor)
+      ? parsed.questions_for_doctor.map((item) => String(item)).slice(0, 8)
+      : [],
+    sources: Array.isArray(parsed.sources) && parsed.sources.length > 0
+      ? parsed.sources
+          .map((source) => ({
+            guideline_id: String(source.guideline_id ?? ""),
+            guideline_name: String(source.guideline_name ?? ""),
+            source_url: String(source.source_url ?? ""),
+            pdf_url: String(source.pdf_url ?? ""),
+          }))
+          .filter((source) => source.guideline_name && source.source_url)
+      : getDefaultSources(validation),
   };
 }
 
 async function callOpenAi(
   caseInput: CaseInput,
   validation: ValidationResult,
-): Promise<PatientExplanation | null> {
-  const apiKey = process.env.OPENAI_API_KEY;
+): Promise<{ explanation: PatientExplanation; model: string; response_id: string | null }> {
+  const apiKey = process.env.OPENAI_API_KEY?.trim();
   if (!apiKey) {
-    return null;
+    throw new Error("OPENAI_API_KEY не задан. Patient-режим работает только через LLM.");
   }
 
-  const model = process.env.OPENAI_MODEL ?? "gpt-5.2-mini";
+  const model = process.env.OPENAI_MODEL ?? "gpt-5.2";
 
   const prompt = `
 Ты медицинский AI-ассистент для пациента. Объясняй просто, но без назначения лечения.
@@ -92,53 +113,46 @@ ${JSON.stringify(validation, null, 2)}
   });
 
   if (!response.ok) {
-    return null;
+    const errorBody = await response.text();
+    throw new Error(`OpenAI API вернул ${response.status}: ${errorBody.slice(0, 300)}`);
   }
 
   const payload = (await response.json()) as ChatCompletionResponse;
   const content = payload.choices?.[0]?.message?.content;
 
   if (!content) {
-    return null;
+    throw new Error(payload.error?.message ?? "OpenAI не вернул content в ответе");
   }
 
-  try {
-    const parsed = JSON.parse(content) as PatientExplanation;
+  const jsonText = extractJsonObject(content);
+  const parsed = JSON.parse(jsonText) as Partial<PatientExplanation>;
+  const explanation = normalizeExplanation(parsed, validation);
 
-    if (!parsed.plain_summary || !parsed.why_this_is_recommended) {
-      return null;
-    }
-
-    if (!Array.isArray(parsed.questions_for_doctor)) {
-      parsed.questions_for_doctor = [];
-    }
-
-    if (!Array.isArray(parsed.sources)) {
-      parsed.sources = validation.applied_guideline_versions.map((item) => ({
-        guideline_id: item.id,
-        guideline_name: item.name,
-        source_url: item.source_url,
-        pdf_url: item.pdf_url,
-      }));
-    }
-
-    return parsed;
-  } catch {
-    return null;
-  }
+  return {
+    explanation,
+    model,
+    response_id: payload.id ?? null,
+  };
 }
 
 export async function buildPatientExplanation(
   caseInput: CaseInput,
   validation: ValidationResult,
-  forceFallback = false,
-): Promise<PatientExplanation> {
-  if (!forceFallback) {
-    const llmOutput = await callOpenAi(caseInput, validation);
-    if (llmOutput) {
-      return llmOutput;
-    }
-  }
-
-  return fallbackPatientExplanation(caseInput, validation);
+): Promise<{
+  explanation: PatientExplanation;
+  llm: {
+    provider: "openai";
+    model: string;
+    response_id: string | null;
+  };
+}> {
+  const llmOutput = await callOpenAi(caseInput, validation);
+  return {
+    explanation: llmOutput.explanation,
+    llm: {
+      provider: "openai",
+      model: llmOutput.model,
+      response_id: llmOutput.response_id,
+    },
+  };
 }

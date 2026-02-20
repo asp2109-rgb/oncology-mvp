@@ -103,7 +103,7 @@ export function runBenchmark(datasetVersion = "v1"): BenchmarkReport {
     },
     notes: [
       "Ретроспективные, синтетические и литературные сценарии выполнены текущим rule engine.",
-      "Участие LLM опционально и не влияет на стабильность базового rule-based контура.",
+      "Patient-mode использует LLM-объяснение поверх результатов проверки.",
       "Метрики предназначены для итераций MVP и не являются клиническими claims.",
     ],
     created_at: new Date().toISOString(),

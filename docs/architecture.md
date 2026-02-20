@@ -4,7 +4,7 @@
 - Next.js (App Router, TypeScript)
 - SQLite + FTS5 (`better-sqlite3`)
 - Rule engine (deterministic)
-- Optional LLM adapter (`OPENAI_API_KEY`)
+- LLM adapter for patient-mode (`OPENAI_API_KEY`, `OPENAI_MODEL`)
 - External data sources:
   - Minzdrav API (`apicr.minzdrav.gov.ru`)
   - ClinicalTrials.gov API v2
@@ -13,7 +13,7 @@
 - `src/lib/db.ts` — schema, persistence, benchmark/validation storage, trials cache
 - `src/lib/search/providers.ts` — `SearchProvider` contract, `SqlFtsProvider`, `RuleIndexProvider`
 - `src/lib/validation/rule-engine.ts` — case validation and retrospective selection logic
-- `src/lib/llm.ts` — optional patient-friendly explanation via OpenAI fallback to rules-only summary
+- `src/lib/llm.ts` — patient-friendly explanation via OpenAI (`llm_only`)
 - `src/lib/benchmark.ts` — benchmark runner and metrics
 - `src/lib/trials.ts` — clinical trials search + TTL cache
 
@@ -36,7 +36,7 @@
 Guideline versions are selected by:
 - diagnosis keyword match,
 - `publish_date <= as_of_date`,
-- fallback to closest available if strict historical match is absent.
+- выбор ближайшей доступной версии, если точного исторического совпадения нет.
 
 ## Security constraints
 - No personal patient identifiers are required.

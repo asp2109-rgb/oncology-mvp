@@ -10,7 +10,7 @@ Reduce manual burden of guideline checks and improve transparency of treatment-p
 - Ingestion: Minzdrav API (`status=0`, `status=4`, `C00-D48`)
 - Normalization: sections and recommendation chunking
 - Retrieval: FTS + rule index providers
-- Inference: deterministic validation + optional LLM explanation
+- Inference: deterministic validation + LLM explanation для patient-mode
 - Outputs: doctor report, patient explanation, benchmark dashboard
 
 ## Validation Metrics

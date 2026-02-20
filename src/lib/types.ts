@@ -110,5 +110,4 @@ export type BenchmarkReport = {
 export const patientExplainRequestSchema = z.object({
   case_input: caseInputSchema,
   validation: z.custom<ValidationResult>().optional(),
-  force_fallback: z.boolean().optional().default(false),
 });

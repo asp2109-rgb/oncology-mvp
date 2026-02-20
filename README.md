@@ -33,7 +33,7 @@ Next.js fullstack MVP для ретроспективной проверки п�
 
 - Next.js 16, TypeScript
 - SQLite + FTS5 (`better-sqlite3`)
-- Rule engine + опциональный OpenAI LLM слой
+- Rule engine + OpenAI LLM слой для patient-mode
 - Парсинг входных документов: `pdf-parse`, `mammoth`, `word-extractor`
 
 ## Быстрый старт
@@ -53,13 +53,13 @@ npm run dev
 
 ```bash
 OPENAI_API_KEY=...
-OPENAI_MODEL=gpt-5.2-mini
+OPENAI_MODEL=gpt-5.2
 ONCO_DB_PATH=/absolute/path/to/oncology.db
 PUBLIC_DEMO_URL=https://your-demo-url
 PUBLIC_DOCS_URL=https://your-docs-url
 ```
 
-Без `OPENAI_API_KEY` пациентское объяснение работает в детерминированном fallback режиме.
+`OPENAI_API_KEY` обязателен для `/api/patient/explain` (режим `llm_only`).
 
 ## Скрипты
 
@@ -100,8 +100,8 @@ ONCO_KEEP_GUIDELINES=18 npm run db:prepare-deploy
 - `data/oncology.deploy.db`
 3. На Render создайте сервис через Blueprint из репозитория (файл `render.yaml` применится автоматически).
 4. При необходимости добавьте в Environment:
-- `OPENAI_API_KEY` (опционально, для LLM-объяснений)
-- `OPENAI_MODEL` (опционально)
+- `OPENAI_API_KEY` (обязателен для patient-mode)
+- `OPENAI_MODEL` (по умолчанию `gpt-5.2`)
 
 ## Артефакты
 
