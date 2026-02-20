@@ -14,6 +14,7 @@ export async function GET() {
     counts,
     llm_enabled: Boolean(process.env.OPENAI_API_KEY),
     llm_model: process.env.OPENAI_MODEL ?? "gpt-4o-mini",
+    doctor_validation_mode: "rules_plus_llm",
     patient_explanation_mode: "llm_only",
   });
 }

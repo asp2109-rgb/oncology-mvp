@@ -5,7 +5,7 @@ import { FileUp, Loader2, SearchCheck } from "lucide-react";
 import { SectionCard } from "@/components/section-card";
 import { MetricChip } from "@/components/metric-chip";
 import { sampleCaseInput } from "@/lib/sample-data";
-import type { CaseInput, ValidationResult } from "@/lib/types";
+import type { CaseInput, DoctorValidationResponse, ValidationResult } from "@/lib/types";
 
 type ParseResponse = {
   source: string;
@@ -29,6 +29,10 @@ function humanizeValidationStatus(status: ValidationResult["status"]): string {
   return status === "compliant" ? "Соответствует" : "Требует проверки";
 }
 
+function humanizeLlmVerdict(verdict: "confirmed" | "needs_attention"): string {
+  return verdict === "confirmed" ? "Подтверждено LLM" : "Требует внимания (LLM)";
+}
+
 export default function DoctorPage() {
   const [diagnosis, setDiagnosis] = useState(defaultCase.diagnosis);
   const [stage, setStage] = useState(defaultCase.stage);
@@ -42,7 +46,7 @@ export default function DoctorPage() {
   const [parsePreview, setParsePreview] = useState("");
   const [parseWarnings, setParseWarnings] = useState<string[]>([]);
 
-  const [result, setResult] = useState<ValidationResult | null>(null);
+  const [result, setResult] = useState<DoctorValidationResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [parsing, setParsing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -127,7 +131,7 @@ export default function DoctorPage() {
         throw new Error(data?.details ?? "Ошибка валидации кейса");
       }
 
-      setResult(data as ValidationResult);
+      setResult(data as DoctorValidationResponse);
     } catch (caughtError) {
       setError(caughtError instanceof Error ? caughtError.message : "Неожиданная ошибка валидации");
     } finally {
@@ -276,7 +280,7 @@ export default function DoctorPage() {
 
       <SectionCard
         title="Результат валидации"
-        subtitle="Совпадения, несоответствия, недостающие действия, конфликты и трассируемость источников"
+        subtitle="Rule-based проверка + заключение LLM для врача"
       >
         {!result ? (
           <p className="text-sm text-[#afcae4]">Запустите проверку кейса, чтобы увидеть структурированный результат.</p>
@@ -287,6 +291,39 @@ export default function DoctorPage() {
               <MetricChip label="Задержка" value={`${result.latency_ms} мс`} />
               <MetricChip label="Доказательства" value={String(result.evidence.length)} />
               <MetricChip label="Трассируемость" value={`${Math.round(result.source_traceability_rate * 100)}%`} />
+            </div>
+
+            <div className="rounded-2xl border border-[#2d4c6f] bg-[#0c2036] p-4 text-sm text-[#d8eeff]">
+              <p className="text-xs uppercase tracking-[0.14em] text-[#89b1d8]">LLM-проверка</p>
+              <p className="mt-2">
+                {humanizeLlmVerdict(result.llm_review.verdict)} | {result.llm_review.provider} / {result.llm_review.model}
+              </p>
+              {result.llm_review.response_id ? (
+                <p className="mt-1 text-[11px] text-[#8fb6dd]">response_id: {result.llm_review.response_id}</p>
+              ) : null}
+              <p className="mt-2 leading-6">{result.llm_review.clinical_rationale}</p>
+
+              {result.llm_review.critical_risks.length > 0 ? (
+                <div className="mt-3">
+                  <p className="text-xs uppercase tracking-[0.12em] text-[#9fc3e6]">Критические риски</p>
+                  <ul className="mt-1 list-disc space-y-1 pl-5 text-sm text-[#ffbcbc]">
+                    {result.llm_review.critical_risks.map((risk) => (
+                      <li key={risk}>{risk}</li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+
+              {result.llm_review.additional_checks.length > 0 ? (
+                <div className="mt-3">
+                  <p className="text-xs uppercase tracking-[0.12em] text-[#9fc3e6]">Дополнительные проверки</p>
+                  <ul className="mt-1 list-disc space-y-1 pl-5 text-sm text-[#cce7ff]">
+                    {result.llm_review.additional_checks.map((item) => (
+                      <li key={item}>{item}</li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
             </div>
 
             <ResultList title="Совпадения" values={result.matches} color="text-[#80f0d6]" />

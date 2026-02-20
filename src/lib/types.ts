@@ -53,6 +53,20 @@ export type ValidationResult = {
   generated_at: string;
 };
 
+export type DoctorLlmReview = {
+  provider: "openai";
+  model: string;
+  response_id: string | null;
+  verdict: "confirmed" | "needs_attention";
+  clinical_rationale: string;
+  critical_risks: string[];
+  additional_checks: string[];
+};
+
+export type DoctorValidationResponse = ValidationResult & {
+  llm_review: DoctorLlmReview;
+};
+
 export type PatientExplanation = {
   plain_summary: string;
   why_this_is_recommended: string;
