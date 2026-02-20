@@ -1,0 +1,39 @@
+[
+  {
+    "id": "syn-001",
+    "title": "Синтетика: заведомо нерелевантный пункт",
+    "dataset": "synthetic",
+    "expected_status": "review_required",
+    "expected_mismatch": true,
+    "case_input": {
+      "diagnosis": "Рак желудка",
+      "stage": "II",
+      "biomarkers": [],
+      "as_of_date": "2022-06-01",
+      "current_plan": [
+        "Гомеопатия как единственный метод",
+        "Игнорировать контрольные обследования"
+      ],
+      "timeline": []
+    }
+  },
+  {
+    "id": "syn-002",
+    "title": "Синтетика: стандартный контроль и системная терапия",
+    "dataset": "synthetic",
+    "expected_status": "compliant",
+    "expected_mismatch": false,
+    "case_input": {
+      "diagnosis": "Злокачественное новообразование бронхов и легкого",
+      "stage": "III",
+      "biomarkers": ["PD-L1 unknown"],
+      "as_of_date": "2025-12-01",
+      "current_plan": [
+        "Системная лекарственная терапия по линии",
+        "КТ-контроль",
+        "Рассмотрение хирургического этапа при резектабельности"
+      ],
+      "timeline": []
+    }
+  }
+]

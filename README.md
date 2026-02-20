@@ -1,36 +1,110 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# MVP проверки онколечения
 
-## Getting Started
+Next.js fullstack MVP для ретроспективной проверки протоколов онколечения на соответствие клиническим рекомендациям.
 
-First, run the development server:
+## Что реализовано
+
+- Два интерфейса:
+  - `/doctor` — проверка протокола: несоответствия, пропущенные шаги, ссылки на доказательства
+  - `/patient` — объяснение простым языком на основе того же результата валидации
+- Панель бенчмарка:
+  - `/benchmark` с запуском и просмотром последнего отчета
+- Реестр источников:
+  - `/sources` со списком версий рекомендаций и ссылками
+- Загрузка и индексация КР из API Минздрава:
+  - `GetJsonClinrecsFilterV2`
+  - `GetClinrec2`
+  - `GetClinrecPdf`
+- Интеграция clinicaltrials.gov:
+  - `GET /api/trials/search`
+- “Всеядный” парсинг входа:
+  - `POST /api/case/parse` (файл и/или текст)
+- API эндпоинты:
+  - `POST /api/doctor/validate`
+  - `POST /api/patient/explain`
+  - `POST /api/guidelines/search`
+  - `POST /api/case/parse`
+  - `GET /api/trials/search?query=...&recruiting=true`
+  - `POST /api/benchmark/run`
+  - `GET /api/benchmark/latest`
+  - `GET /api/health`
+
+## Стек
+
+- Next.js 16, TypeScript
+- SQLite + FTS5 (`better-sqlite3`)
+- Rule engine + опциональный OpenAI LLM слой
+- Парсинг входных документов: `pdf-parse`, `mammoth`, `word-extractor`
+
+## Быстрый старт
 
 ```bash
+npm install
+npm run db:init
+npm run ingest:minzdrav
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Откройте [http://localhost:3000](http://localhost:3000).
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Переменные окружения
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Опционально:
 
-## Learn More
+```bash
+OPENAI_API_KEY=...
+OPENAI_MODEL=gpt-4.1-mini
+ONCO_DB_PATH=/absolute/path/to/oncology.db
+PUBLIC_DEMO_URL=https://your-demo-url
+PUBLIC_DOCS_URL=https://your-docs-url
+```
 
-To learn more about Next.js, take a look at the following resources:
+Без `OPENAI_API_KEY` пациентское объяснение работает в детерминированном fallback режиме.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Скрипты
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+- `npm run dev` — запуск приложения
+- `npm run build` — build
+- `npm run lint` — lint
+- `npm run test` — unit-тесты
+- `npm run db:init` — инициализация схемы БД
+- `npm run ingest:minzdrav` — загрузка онко-КР (`C00-D48`, статусы 0 + 4)
+- `npm run db:prepare-deploy` — подготовка облегченной базы `data/oncology.deploy.db` для деплоя
+- `npm run benchmark:sample` — запуск бенчмарка на встроенных наборах
+- `npm run qr:generate` — генерация `public/qr/qr-demo.png` и `public/qr/qr-docs.png`
 
-## Deploy on Vercel
+## Форматы входа для `/api/case/parse`
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+- Рекомендуемые: `pdf`, `doc`, `docx`, `txt`, `md`, `csv`, `tsv`, `json`, `rtf`, `xml`, `html`, `yaml`, `yml`, `log`, `ini`
+- Для прочих форматов работает best-effort fallback (текстовое декодирование)
+- Для сканированных PDF (изображения без текстового слоя) потребуется OCR
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Ограничения
+
+- Входные кейсы должны быть обезличены.
+- MVP не назначает лечение автономно.
+- Финальное клиническое решение остается за врачом.
+
+## Деплой на Render (free)
+
+1. Подготовьте deploy-базу:
+```bash
+npm run db:prepare-deploy
+```
+По умолчанию сохраняются 10 последних КР. Для большего охвата:
+```bash
+ONCO_KEEP_GUIDELINES=18 npm run db:prepare-deploy
+```
+2. Убедитесь, что в репозитории есть:
+- `render.yaml`
+- `data/oncology.deploy.db`
+3. На Render создайте сервис через Blueprint из репозитория (файл `render.yaml` применится автоматически).
+4. При необходимости добавьте в Environment:
+- `OPENAI_API_KEY` (опционально, для LLM-объяснений)
+- `OPENAI_MODEL` (опционально)
+
+## Артефакты
+
+- `docs/architecture.md`
+- `deliverables/presentation-9-slides.md`
+- `deliverables/poster-a1-content.md`

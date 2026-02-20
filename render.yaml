@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: oncology-mvp
+    runtime: node
+    plan: free
+    rootDir: .
+    autoDeploy: true
+    buildCommand: npm ci && npm run build
+    startCommand: npm run start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NODE_VERSION
+        value: 22
+      - key: ONCO_DB_PATH
+        value: data/oncology.deploy.db
+      - key: OPENAI_MODEL
+        value: gpt-4.1-mini

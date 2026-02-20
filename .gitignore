@@ -39,3 +39,9 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# local datasets
+data/oncology.db
+data/oncology.db-shm
+data/oncology.db-wal
+!data/oncology.deploy.db

@@ -1,26 +1,38 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #061120;
+  --foreground: #e9f5ff;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  --font-sans: var(--font-body);
+  --font-heading: var(--font-heading);
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-body), sans-serif;
+}
+
+h1,
+h2,
+h3,
+h4 {
+  font-family: var(--font-heading), sans-serif;
+}
+
+::selection {
+  background: rgba(71, 191, 211, 0.3);
+  color: #ffffff;
+}
+
+.grid-pattern {
+  background-image:
+    linear-gradient(rgba(141, 173, 212, 0.07) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(141, 173, 212, 0.07) 1px, transparent 1px);
+  background-size: 28px 28px;
 }

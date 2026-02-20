@@ -1,0 +1,21 @@
+[
+  {
+    "id": "lit-001",
+    "title": "Литература: комбинированный подход для solid tumor",
+    "dataset": "literature",
+    "expected_status": "compliant",
+    "expected_mismatch": false,
+    "case_input": {
+      "diagnosis": "Рак прямой кишки",
+      "stage": "III",
+      "biomarkers": [],
+      "as_of_date": "2024-07-01",
+      "current_plan": [
+        "Мультидисциплинарный консилиум",
+        "Комбинированное лечение",
+        "Динамический контроль"
+      ],
+      "timeline": []
+    }
+  }
+]

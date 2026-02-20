@@ -1,0 +1,39 @@
+[
+  {
+    "id": "retro-001",
+    "title": "Рак желудка: хирургия + периоперационная терапия",
+    "dataset": "retrospective",
+    "expected_status": "compliant",
+    "expected_mismatch": false,
+    "case_input": {
+      "diagnosis": "Рак желудка",
+      "stage": "cT3N1M0",
+      "biomarkers": ["HER2 unknown"],
+      "as_of_date": "2021-04-15",
+      "current_plan": [
+        "Периоперационная химиотерапия FLOT",
+        "Хирургическое лечение"
+      ],
+      "timeline": []
+    }
+  },
+  {
+    "id": "retro-002",
+    "title": "Рак молочной железы: много линий терапии",
+    "dataset": "retrospective",
+    "expected_status": "review_required",
+    "expected_mismatch": true,
+    "case_input": {
+      "diagnosis": "Рак молочной железы, трижды негативный",
+      "stage": "IV",
+      "biomarkers": ["ER 0", "PR 0", "HER2 negative"],
+      "as_of_date": "2025-03-10",
+      "current_plan": [
+        "ПХТ паклитаксел + карбоплатин",
+        "Эрибулин",
+        "Доксорубицин еженедельно"
+      ],
+      "timeline": []
+    }
+  }
+]
