@@ -73,6 +73,8 @@ function buildCitations(
         section_title: "",
         source_anchor: null,
         excerpt: "",
+        source: "minzdrav",
+        access_mode: "local",
         source_url: "",
         pdf_url: "",
       };
@@ -87,6 +89,8 @@ function buildCitations(
       section_title: hit.section_title,
       source_anchor: hit.source_anchor,
       excerpt: hit.chunk_text.slice(0, 280),
+      source: hit.source,
+      access_mode: hit.access_mode,
       source_url: guideline?.source_url ?? "",
       pdf_url: guideline?.pdf_url ?? "",
     };

@@ -40,5 +40,7 @@ describe("database schema", () => {
     expect(names).toContain("validation_runs");
     expect(names).toContain("benchmark_runs");
     expect(names).toContain("trials_cache");
+    expect(names).toContain("source_documents");
+    expect(names).toContain("source_sync_logs");
   });
 });

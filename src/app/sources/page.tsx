@@ -1,6 +1,7 @@
 import { listGuidelineSources } from "@/lib/guidelines";
 import { getGuidelineCounts } from "@/lib/db";
 import { SectionCard } from "@/components/section-card";
+import { getSourceStatus } from "@/lib/source-sync";
 
 const externalLinks = [
   { label: "Рубрикатор Минздрава", href: "https://cr.minzdrav.gov.ru/" },
@@ -12,6 +13,7 @@ const externalLinks = [
 export default function SourcesPage() {
   const counts = getGuidelineCounts();
   const sources = listGuidelineSources(300);
+  const status = getSourceStatus();
 
   return (
     <div className="grid gap-6">
@@ -38,6 +40,32 @@ export default function SourcesPage() {
             >
               {link.label}
             </a>
+          ))}
+        </div>
+      </SectionCard>
+
+      <SectionCard title="Статус source-catalog">
+        <div className="space-y-2">
+          {status.map((item) => (
+            <div key={item.source} className="rounded-xl border border-[#2d4c6f] bg-[#0c2036]/90 p-3 text-sm text-[#d9eeff]">
+              <p className="font-medium">{item.label}</p>
+              <p className="mt-1 text-xs text-[#9ec2e4]">
+                downloaded: {item.downloaded_count} | online_only: {item.online_only_count} | failed: {item.failed_count}
+              </p>
+              <p className="mt-1 text-xs text-[#9ec2e4]">
+                last attempt: {item.last_attempt_at ?? "нет"} {item.last_attempt_status ? `(${item.last_attempt_status})` : ""}
+              </p>
+              {item.last_attempt_url ? (
+                <a
+                  href={item.last_attempt_url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="mt-1 inline-block text-xs text-[#82dcf4] hover:underline"
+                >
+                  источник
+                </a>
+              ) : null}
+            </div>
           ))}
         </div>
       </SectionCard>

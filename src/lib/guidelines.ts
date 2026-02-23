@@ -55,27 +55,7 @@ export function selectApplicableGuidelines(
   }>;
 
   if (!candidates.length) {
-    return database
-      .prepare(
-        `
-        SELECT id, name, publish_date, status, source_url, pdf_url
-        FROM guidelines
-        WHERE is_oncology = 1
-        ORDER BY publish_date DESC
-        LIMIT ?
-      `,
-      )
-      .all(limit)
-      .map((row) => ({
-        id: String((row as Record<string, unknown>).id),
-        name: String((row as Record<string, unknown>).name),
-        publish_date: (row as Record<string, unknown>).publish_date
-          ? String((row as Record<string, unknown>).publish_date)
-          : null,
-        status: Number((row as Record<string, unknown>).status),
-        source_url: String((row as Record<string, unknown>).source_url),
-        pdf_url: String((row as Record<string, unknown>).pdf_url),
-      }));
+    return [];
   }
 
   const asOfTimestamp = parseDate(asOfDate);

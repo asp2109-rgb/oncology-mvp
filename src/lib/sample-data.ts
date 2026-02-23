@@ -3,7 +3,18 @@ import type { CaseInput } from "@/lib/types";
 export const sampleCaseInput: CaseInput = {
   diagnosis: "Рак молочной железы, трижды негативный подтип",
   stage: "IV",
+  sex: "female",
+  age: 54,
+  histology: "Инвазивная карцинома молочной железы",
   biomarkers: ["ER 0", "PR 0", "HER2 negative", "PD-L1 CPS 10"],
+  comorbidities: ["Артериальная гипертензия"],
+  prior_surgeries: ["Секторальная резекция молочной железы"],
+  radiation_history: [],
+  labs: {
+    "Hb": "121 г/л",
+    "ALT": "26 Ед/л",
+  },
+  contraindications: [],
   as_of_date: "2025-03-10",
   current_plan: [
     "ПХТ паклитаксел + карбоплатин",

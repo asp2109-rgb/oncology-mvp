@@ -71,10 +71,18 @@ describe("rule engine", () => {
       ]);
     });
 
-    const result = validateCase({
+    const result = await validateCase({
       diagnosis: "Рак желудка",
       stage: "III",
+      sex: "unknown",
+      age: null,
+      histology: "",
       biomarkers: [],
+      comorbidities: [],
+      prior_surgeries: [],
+      radiation_history: [],
+      labs: {},
+      contraindications: [],
       as_of_date: "2021-03-01",
       current_plan: ["Периоперационная химиотерапия FLOT", "Гомеопатия"],
       timeline: [],
@@ -84,5 +92,7 @@ describe("rule engine", () => {
     expect(result.mismatches).toContain("Гомеопатия");
     expect(result.status).toBe("review_required");
     expect(result.applied_guideline_versions.length).toBeGreaterThan(0);
+    expect(result.retrieval_mode_used).toBeDefined();
+    expect(result.source_coverage.length).toBeGreaterThan(0);
   });
 });

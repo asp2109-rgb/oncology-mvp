@@ -1,7 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
+import { randomUUID } from "node:crypto";
 import Database from "better-sqlite3";
-import type { BenchmarkReport, ValidationResult } from "@/lib/types";
+import type { BenchmarkReport, SourceId, ValidationResult } from "@/lib/types";
 import { nowIso, safeJsonParse } from "@/lib/utils";
 
 type DbInstance = Database.Database;
@@ -38,6 +39,21 @@ export type RecommendationChunkRecord = {
   tags: string[];
   evidence_level: string | null;
   source_anchor: string | null;
+};
+
+export type SourceDocumentRecord = {
+  document_id: string;
+  source: SourceId;
+  title: string;
+  url: string;
+  version: string | null;
+  published_at: string | null;
+  access_level: "open" | "login_required" | "restricted";
+  ingest_status: "downloaded" | "online_only" | "failed";
+  http_status: number | null;
+  failure_reason: string | null;
+  content_text: string;
+  metadata_json: string;
 };
 
 function resolveDbPath(): string {
@@ -177,6 +193,44 @@ export function initDb(): void {
       fetched_at TEXT NOT NULL,
       payload_json TEXT NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS source_documents (
+      document_id TEXT PRIMARY KEY,
+      source TEXT NOT NULL,
+      title TEXT NOT NULL,
+      url TEXT NOT NULL,
+      version TEXT,
+      published_at TEXT,
+      access_level TEXT NOT NULL DEFAULT 'open',
+      ingest_status TEXT NOT NULL,
+      http_status INTEGER,
+      failure_reason TEXT,
+      content_text TEXT NOT NULL DEFAULT '',
+      metadata_json TEXT NOT NULL DEFAULT '{}',
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_source_documents_source ON source_documents(source);
+    CREATE INDEX IF NOT EXISTS idx_source_documents_status ON source_documents(ingest_status);
+    CREATE INDEX IF NOT EXISTS idx_source_documents_updated ON source_documents(updated_at DESC);
+
+    CREATE VIRTUAL TABLE IF NOT EXISTS source_documents_fts
+    USING fts5(document_id UNINDEXED, source, title, content_text, keywords);
+
+    CREATE TABLE IF NOT EXISTS source_sync_logs (
+      log_id TEXT PRIMARY KEY,
+      source TEXT NOT NULL,
+      url TEXT NOT NULL,
+      attempted_at TEXT NOT NULL,
+      status TEXT NOT NULL,
+      http_status INTEGER,
+      failure_reason TEXT,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_source_sync_logs_source ON source_sync_logs(source);
+    CREATE INDEX IF NOT EXISTS idx_source_sync_logs_attempted ON source_sync_logs(attempted_at DESC);
   `);
 
   initialized = true;
@@ -387,4 +441,219 @@ export function readTrialsCache(queryKey: string): { fetched_at: string; payload
     .get(queryKey) as { fetched_at: string; payload_json: string } | undefined;
 
   return row ?? null;
+}
+
+export function deleteSourceDocumentsBySource(source: SourceId): void {
+  initDb();
+  const database = getDb();
+
+  const existing = database
+    .prepare("SELECT document_id FROM source_documents WHERE source = ?")
+    .all(source) as Array<{ document_id: string }>;
+
+  const deleteFts = database.prepare("DELETE FROM source_documents_fts WHERE document_id = ?");
+  for (const row of existing) {
+    deleteFts.run(row.document_id);
+  }
+
+  database.prepare("DELETE FROM source_documents WHERE source = ?").run(source);
+}
+
+export function upsertSourceDocument(
+  record: SourceDocumentRecord,
+  keywords: string[] = [],
+): void {
+  initDb();
+  const database = getDb();
+
+  database
+    .prepare(
+      `
+      INSERT INTO source_documents (
+        document_id,
+        source,
+        title,
+        url,
+        version,
+        published_at,
+        access_level,
+        ingest_status,
+        http_status,
+        failure_reason,
+        content_text,
+        metadata_json,
+        updated_at
+      ) VALUES (
+        @document_id,
+        @source,
+        @title,
+        @url,
+        @version,
+        @published_at,
+        @access_level,
+        @ingest_status,
+        @http_status,
+        @failure_reason,
+        @content_text,
+        @metadata_json,
+        @updated_at
+      )
+      ON CONFLICT(document_id) DO UPDATE SET
+        source = excluded.source,
+        title = excluded.title,
+        url = excluded.url,
+        version = excluded.version,
+        published_at = excluded.published_at,
+        access_level = excluded.access_level,
+        ingest_status = excluded.ingest_status,
+        http_status = excluded.http_status,
+        failure_reason = excluded.failure_reason,
+        content_text = excluded.content_text,
+        metadata_json = excluded.metadata_json,
+        updated_at = excluded.updated_at
+    `,
+    )
+    .run({
+      ...record,
+      updated_at: nowIso(),
+    });
+
+  database.prepare("DELETE FROM source_documents_fts WHERE document_id = ?").run(record.document_id);
+  database
+    .prepare(
+      `
+      INSERT INTO source_documents_fts (document_id, source, title, content_text, keywords)
+      VALUES (?, ?, ?, ?, ?)
+    `,
+    )
+    .run(
+      record.document_id,
+      record.source,
+      record.title,
+      record.content_text,
+      Array.from(new Set(keywords)).join(" "),
+    );
+}
+
+export function logSourceSyncAttempt(params: {
+  source: SourceId;
+  url: string;
+  status: "downloaded" | "online_only" | "failed";
+  http_status?: number | null;
+  failure_reason?: string | null;
+  attempted_at?: string;
+}): void {
+  initDb();
+  const database = getDb();
+
+  database
+    .prepare(
+      `
+      INSERT INTO source_sync_logs (
+        log_id,
+        source,
+        url,
+        attempted_at,
+        status,
+        http_status,
+        failure_reason
+      ) VALUES (?, ?, ?, ?, ?, ?, ?)
+    `,
+    )
+    .run(
+      randomUUID(),
+      params.source,
+      params.url,
+      params.attempted_at ?? nowIso(),
+      params.status,
+      params.http_status ?? null,
+      params.failure_reason ?? null,
+    );
+}
+
+export function listSourceStatus(): Array<{
+  source: SourceId;
+  downloaded_count: number;
+  online_only_count: number;
+  failed_count: number;
+  last_indexed_at: string | null;
+  last_attempt_at: string | null;
+  last_attempt_status: string | null;
+  last_attempt_url: string | null;
+  last_attempt_http_status: number | null;
+  last_attempt_failure_reason: string | null;
+}> {
+  initDb();
+  const database = getDb();
+
+  const countsRows = database
+    .prepare(
+      `
+      SELECT
+        source,
+        SUM(CASE WHEN ingest_status = 'downloaded' THEN 1 ELSE 0 END) AS downloaded_count,
+        SUM(CASE WHEN ingest_status = 'online_only' THEN 1 ELSE 0 END) AS online_only_count,
+        SUM(CASE WHEN ingest_status = 'failed' THEN 1 ELSE 0 END) AS failed_count,
+        MAX(updated_at) AS last_indexed_at
+      FROM source_documents
+      GROUP BY source
+    `,
+    )
+    .all() as Array<Record<string, unknown>>;
+
+  const lastAttemptRows = database
+    .prepare(
+      `
+      SELECT l.source, l.attempted_at, l.status, l.url, l.http_status, l.failure_reason
+      FROM source_sync_logs l
+      INNER JOIN (
+        SELECT source, MAX(attempted_at) AS attempted_at
+        FROM source_sync_logs
+        GROUP BY source
+      ) latest
+        ON latest.source = l.source
+       AND latest.attempted_at = l.attempted_at
+    `,
+    )
+    .all() as Array<Record<string, unknown>>;
+
+  const countsBySource = new Map(
+    countsRows.map((row) => [
+      String(row.source),
+      {
+        downloaded_count: Number(row.downloaded_count ?? 0),
+        online_only_count: Number(row.online_only_count ?? 0),
+        failed_count: Number(row.failed_count ?? 0),
+        last_indexed_at: row.last_indexed_at ? String(row.last_indexed_at) : null,
+      },
+    ]),
+  );
+
+  const attemptsBySource = new Map(
+    lastAttemptRows.map((row) => [
+      String(row.source),
+      {
+        last_attempt_at: row.attempted_at ? String(row.attempted_at) : null,
+        last_attempt_status: row.status ? String(row.status) : null,
+        last_attempt_url: row.url ? String(row.url) : null,
+        last_attempt_http_status:
+          row.http_status === null || row.http_status === undefined ? null : Number(row.http_status),
+        last_attempt_failure_reason: row.failure_reason ? String(row.failure_reason) : null,
+      },
+    ]),
+  );
+
+  const sources = new Set<string>([...countsBySource.keys(), ...attemptsBySource.keys()]);
+  return Array.from(sources).map((source) => ({
+    source: source as SourceId,
+    downloaded_count: countsBySource.get(source)?.downloaded_count ?? 0,
+    online_only_count: countsBySource.get(source)?.online_only_count ?? 0,
+    failed_count: countsBySource.get(source)?.failed_count ?? 0,
+    last_indexed_at: countsBySource.get(source)?.last_indexed_at ?? null,
+    last_attempt_at: attemptsBySource.get(source)?.last_attempt_at ?? null,
+    last_attempt_status: attemptsBySource.get(source)?.last_attempt_status ?? null,
+    last_attempt_url: attemptsBySource.get(source)?.last_attempt_url ?? null,
+    last_attempt_http_status: attemptsBySource.get(source)?.last_attempt_http_status ?? null,
+    last_attempt_failure_reason: attemptsBySource.get(source)?.last_attempt_failure_reason ?? null,
+  }));
 }

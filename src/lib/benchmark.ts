@@ -35,7 +35,7 @@ function round(value: number): number {
   return Number(value.toFixed(4));
 }
 
-export function runBenchmark(datasetVersion = "v1"): BenchmarkReport {
+export async function runBenchmark(datasetVersion = "v1"): Promise<BenchmarkReport> {
   const scenarios = loadAllScenarios();
 
   let statusCorrect = 0;
@@ -51,7 +51,8 @@ export function runBenchmark(datasetVersion = "v1"): BenchmarkReport {
 
   for (const scenario of scenarios) {
     const started = Date.now();
-    const validation = validateCase(scenario.case_input);
+    // eslint-disable-next-line no-await-in-loop
+    const validation = await validateCase(scenario.case_input);
     const elapsed = Date.now() - started;
 
     if (validation.status === scenario.expected_status) {

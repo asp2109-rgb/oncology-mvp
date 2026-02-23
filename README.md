@@ -5,16 +5,18 @@ Next.js fullstack MVP для ретроспективной проверки п�
 ## Что реализовано
 
 - Два интерфейса:
-  - `/doctor` — проверка протокола: rule-based результат + итоговое заключение `RAG+KAG` (LLM, с цитатами из КР)
+  - `/doctor` — проверка протокола: `rules + adaptive retrieval` с выбором источников по чекбоксам, retrieval-mode и online fallback
   - `/patient` — объяснение простым языком на основе того же результата валидации
 - Панель бенчмарка:
   - `/benchmark` с запуском и просмотром последнего отчета
 - Реестр источников:
-  - `/sources` со списком версий рекомендаций и ссылками
+  - `/sources` со списком версий рекомендаций, source-catalog и статусом синхронизации
 - Загрузка и индексация КР из API Минздрава:
   - `GetJsonClinrecsFilterV2`
   - `GetClinrec2`
   - `GetClinrecPdf`
+- Unified source sync:
+  - коннекторы `minzdrav`, `russco`, `nccn_patient`, `nccn_professional`, `esmo`, `asco`, `pubmed`, `femb`
 - Интеграция clinicaltrials.gov:
   - `GET /api/trials/search`
 - “Всеядный” парсинг входа:
@@ -23,6 +25,8 @@ Next.js fullstack MVP для ретроспективной проверки п�
   - `POST /api/doctor/validate`
   - `POST /api/patient/explain`
   - `POST /api/guidelines/search`
+  - `GET /api/sources/status`
+  - `POST /api/sources/sync`
   - `POST /api/case/parse`
   - `GET /api/trials/search?query=...&recruiting=true`
   - `POST /api/benchmark/run`
@@ -70,6 +74,7 @@ PUBLIC_DOCS_URL=https://your-docs-url
 - `npm run test` — unit-тесты
 - `npm run db:init` — инициализация схемы БД
 - `npm run ingest:minzdrav` — загрузка онко-КР (`C00-D48`, статусы 0 + 4)
+- `npm run sources:sync` — синхронизация внешних источников (скачать все доступное + online_only fallback)
 - `npm run db:prepare-deploy` — подготовка облегченной базы `data/oncology.deploy.db` для деплоя
 - `npm run benchmark:sample` — запуск бенчмарка на встроенных наборах
 - `npm run qr:generate` — генерация `public/qr/qr-demo.png` и `public/qr/qr-docs.png`
@@ -92,7 +97,7 @@ PUBLIC_DOCS_URL=https://your-docs-url
 ```bash
 npm run db:prepare-deploy
 ```
-По умолчанию сохраняются 10 последних КР. Для большего охвата:
+По умолчанию сохраняются 40 последних КР. Для большего охвата:
 ```bash
 ONCO_KEEP_GUIDELINES=18 npm run db:prepare-deploy
 ```

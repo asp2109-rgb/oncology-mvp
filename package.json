@@ -12,6 +12,7 @@
     "ingest:minzdrav": "tsx scripts/ingest-minzdrav.ts",
     "db:init": "tsx scripts/init-db.ts",
     "db:prepare-deploy": "bash scripts/prepare-deploy-db.sh",
+    "sources:sync": "tsx scripts/sync-sources.ts",
     "benchmark:sample": "tsx scripts/run-benchmark-sample.ts",
     "qr:generate": "tsx scripts/generate-qr.ts"
   },

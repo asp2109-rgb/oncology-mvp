@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SOURCE_DB="${ONCO_SOURCE_DB:-$ROOT_DIR/data/oncology.db}"
 DEPLOY_DB="${ONCO_DEPLOY_DB:-$ROOT_DIR/data/oncology.deploy.db}"
-KEEP_GUIDELINES="${ONCO_KEEP_GUIDELINES:-10}"
+KEEP_GUIDELINES="${ONCO_KEEP_GUIDELINES:-14}"
 
 if ! command -v sqlite3 >/dev/null 2>&1; then
   echo "sqlite3 не найден. Установите sqlite3 и повторите."

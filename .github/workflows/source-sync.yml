@@ -1,0 +1,40 @@
+name: Source Sync
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 3 * * *"
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Init DB
+        run: npm run db:init
+
+      - name: Ingest Minzdrav
+        run: npm run ingest:minzdrav
+
+      - name: Sync external sources
+        run: npm run sources:sync
+
+      - name: Prepare deploy DB
+        run: npm run db:prepare-deploy
+
+      - name: Upload deploy DB artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: oncology-deploy-db
+          path: data/oncology.deploy.db

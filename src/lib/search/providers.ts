@@ -1,10 +1,12 @@
 import { getDb, initDb } from "@/lib/db";
-import type { SearchHit } from "@/lib/types";
+import { SOURCE_CONFIG } from "@/lib/sources";
+import type { SearchHit, SourceId } from "@/lib/types";
 import { ftsQueryFromText, safeJsonParse } from "@/lib/utils";
 
 export type SearchContext = {
   guideline_ids?: string[];
   section_ids?: string[];
+  sources?: SourceId[];
   limit?: number;
 };
 
@@ -13,19 +15,44 @@ export interface SearchProvider {
   search(query: string, context?: SearchContext): SearchHit[];
 }
 
+function parseSource(value: unknown): SourceId {
+  const raw = String(value ?? "minzdrav") as SourceId;
+  if (raw in SOURCE_CONFIG) {
+    return raw;
+  }
+  return "minzdrav";
+}
+
 function mapRowsToHits(rows: Array<Record<string, unknown>>): SearchHit[] {
-  return rows.map((row) => ({
-    chunk_id: String(row.chunk_id),
-    guideline_id: String(row.guideline_id),
-    guideline_name: String(row.guideline_name),
-    section_id: String(row.section_id),
-    section_title: String(row.section_title),
-    chunk_text: String(row.chunk_text),
-    tags: safeJsonParse<string[]>(String(row.tags), []),
-    evidence_level: row.evidence_level ? String(row.evidence_level) : null,
-    source_anchor: row.source_anchor ? String(row.source_anchor) : null,
-    score: Number(row.score ?? 0),
-  }));
+  return rows.map((row) => {
+    const source = parseSource(row.source);
+    const chunkText = String(row.chunk_text ?? "");
+    const title = String(row.guideline_name ?? row.section_title ?? source);
+
+    return {
+      chunk_id: String(row.chunk_id),
+      guideline_id: String(row.guideline_id),
+      guideline_name: title,
+      section_id: String(row.section_id ?? "source_doc"),
+      section_title: String(row.section_title ?? "Источник"),
+      chunk_text: chunkText || title,
+      tags: safeJsonParse<string[]>(String(row.tags ?? "[]"), []),
+      evidence_level: row.evidence_level ? String(row.evidence_level) : null,
+      source_anchor: row.source_anchor ? String(row.source_anchor) : null,
+      source,
+      source_tier: SOURCE_CONFIG[source].tier,
+      access_mode: row.access_mode === "online" ? "online" : "local",
+      document_url: row.document_url ? String(row.document_url) : "",
+      document_version: row.document_version ? String(row.document_version) : null,
+      score: Number(row.score ?? 0),
+    };
+  });
+}
+
+function contextSources(context: SearchContext): SourceId[] {
+  const incoming = context.sources ?? ["minzdrav"];
+  const valid = incoming.filter((source): source is SourceId => source in SOURCE_CONFIG);
+  return valid.length ? valid : ["minzdrav"];
 }
 
 export class SqlFtsProvider implements SearchProvider {
@@ -34,6 +61,11 @@ export class SqlFtsProvider implements SearchProvider {
   search(query: string, context: SearchContext = {}): SearchHit[] {
     initDb();
     const database = getDb();
+
+    const sources = contextSources(context);
+    if (!sources.includes("minzdrav")) {
+      return [];
+    }
 
     const ftsQuery = ftsQueryFromText(query);
     if (!ftsQuery) {
@@ -70,6 +102,10 @@ export class SqlFtsProvider implements SearchProvider {
         rc.tags,
         rc.evidence_level,
         rc.source_anchor,
+        g.source_url AS document_url,
+        g.publish_date AS document_version,
+        'minzdrav' AS source,
+        'local' AS access_mode,
         bm25(recommendation_chunks_fts) AS score
       FROM recommendation_chunks_fts
       JOIN recommendation_chunks rc ON rc.chunk_id = recommendation_chunks_fts.chunk_id
@@ -94,6 +130,11 @@ export class RuleIndexProvider implements SearchProvider {
   search(query: string, context: SearchContext = {}): SearchHit[] {
     initDb();
     const database = getDb();
+
+    const sources = contextSources(context);
+    if (!sources.includes("minzdrav")) {
+      return [];
+    }
 
     const limit = context.limit ?? 8;
     const normalized = query.trim().toLowerCase();
@@ -126,6 +167,10 @@ export class RuleIndexProvider implements SearchProvider {
         rc.tags,
         rc.evidence_level,
         rc.source_anchor,
+        g.source_url AS document_url,
+        g.publish_date AS document_version,
+        'minzdrav' AS source,
+        'local' AS access_mode,
         CASE
           WHEN lower(rc.chunk_text) LIKE '%рекомендуется%' THEN 0.5
           ELSE 1.0
@@ -147,6 +192,60 @@ export class RuleIndexProvider implements SearchProvider {
   }
 }
 
+export class SourceDocumentProvider implements SearchProvider {
+  public readonly name = "SourceDocumentProvider";
+
+  search(query: string, context: SearchContext = {}): SearchHit[] {
+    initDb();
+    const database = getDb();
+
+    const sources = contextSources(context).filter((source) => source !== "minzdrav");
+    if (!sources.length) {
+      return [];
+    }
+
+    const ftsQuery = ftsQueryFromText(query);
+    if (!ftsQuery) {
+      return [];
+    }
+
+    const limit = Math.max(1, Math.min(30, context.limit ?? 10));
+    const sourceFilter = sources.map(() => "?").join(",");
+    const params: unknown[] = [ftsQuery, ...sources];
+
+    const rows = database
+      .prepare(
+        `
+      SELECT
+        sd.document_id AS chunk_id,
+        sd.document_id AS guideline_id,
+        sd.title AS guideline_name,
+        'source_doc' AS section_id,
+        sd.source AS section_title,
+        sd.content_text AS chunk_text,
+        '[]' AS tags,
+        NULL AS evidence_level,
+        sd.title AS source_anchor,
+        sd.url AS document_url,
+        sd.version AS document_version,
+        sd.source AS source,
+        'local' AS access_mode,
+        bm25(source_documents_fts) AS score
+      FROM source_documents_fts
+      JOIN source_documents sd ON sd.document_id = source_documents_fts.document_id
+      WHERE source_documents_fts MATCH ?
+        AND sd.source IN (${sourceFilter})
+        AND sd.ingest_status = 'downloaded'
+      ORDER BY score ASC
+      LIMIT ${limit}
+    `,
+      )
+      .all(...params) as Array<Record<string, unknown>>;
+
+    return mapRowsToHits(rows);
+  }
+}
+
 export function searchWithProviders(
   providers: SearchProvider[],
   query: string,
@@ -157,9 +256,10 @@ export function searchWithProviders(
   for (const provider of providers) {
     const hits = provider.search(query, context);
     for (const hit of hits) {
-      const existing = merged.get(hit.chunk_id);
+      const key = `${hit.source}:${hit.chunk_id}`;
+      const existing = merged.get(key);
       if (!existing || hit.score < existing.score) {
-        merged.set(hit.chunk_id, hit);
+        merged.set(key, hit);
       }
     }
   }

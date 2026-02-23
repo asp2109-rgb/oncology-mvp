@@ -1,5 +1,36 @@
 export const nowIso = () => new Date().toISOString();
 
+const SHORT_CLINICAL_TOKENS = new Set([
+  "кт",
+  "мрт",
+  "пэт",
+  "er",
+  "pr",
+  "egfr",
+  "alk",
+  "ros1",
+  "her2",
+  "braf",
+  "msi",
+  "tmb",
+  "pdl1",
+  "pd1",
+  "ki67",
+  "kras",
+  "nras",
+  "figo",
+  "tnm",
+]);
+
+function normalizeToken(token: string): string {
+  return token
+    .toLowerCase()
+    .replace(/pd[\s-]?l1/gi, "pdl1")
+    .replace(/ki[\s-]?67/gi, "ki67")
+    .replace(/[^a-z0-9а-яё]/gi, "")
+    .trim();
+}
+
 export function safeJsonParse<T>(value: string | null, fallback: T): T {
   if (!value) {
     return fallback;
@@ -54,11 +85,17 @@ export function toPlainText(html: string): string {
 
 export function tokenize(input: string): string[] {
   return input
-    .toLowerCase()
-    .replace(/[^a-z0-9а-яё\s]/gi, " ")
     .split(/\s+/)
-    .map((token) => token.trim())
-    .filter((token) => token.length >= 3);
+    .map((token) => normalizeToken(token))
+    .filter((token) => {
+      if (!token) {
+        return false;
+      }
+      if (token.length >= 3) {
+        return true;
+      }
+      return SHORT_CLINICAL_TOKENS.has(token);
+    });
 }
 
 export function sentenceChunks(text: string, maxLength = 850): string[] {
@@ -130,5 +167,19 @@ export function ftsQueryFromText(input: string): string {
     return "";
   }
 
-  return tokens.map((token) => `${token}*`).join(" OR ");
+  if (tokens.length === 1) {
+    return `${tokens[0]}*`;
+  }
+
+  if (tokens.length === 2) {
+    return `${tokens[0]}* AND ${tokens[1]}*`;
+  }
+
+  const mandatory = tokens.slice(0, 2).map((token) => `${token}*`).join(" AND ");
+  const optional = tokens
+    .slice(2)
+    .map((token) => `${token}*`)
+    .join(" OR ");
+
+  return `${mandatory} AND (${optional})`;
 }

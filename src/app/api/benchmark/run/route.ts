@@ -16,7 +16,7 @@ export async function POST(request: Request) {
       // keep default dataset version
     }
 
-    const report = runBenchmark(datasetVersion);
+    const report = await runBenchmark(datasetVersion);
 
     return NextResponse.json(report);
   } catch (error) {

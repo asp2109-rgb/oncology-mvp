@@ -11,7 +11,7 @@ export async function POST(request: Request) {
     const payload = await request.json();
     const parsed = patientExplainRequestSchema.parse(payload);
 
-    const validation = parsed.validation ?? validateCase(parsed.case_input);
+    const validation = parsed.validation ?? (await validateCase(parsed.case_input));
     const llmResult = await buildPatientExplanation(
       parsed.case_input,
       validation,
