@@ -46,6 +46,11 @@ DELETE FROM validation_runs;
 DELETE FROM benchmark_runs;
 DELETE FROM trials_cache;
 
+-- FTS5 keeps shadow pages for deleted rows.
+-- Rebuild indexes so deploy DB size reflects retained data only.
+INSERT INTO recommendation_chunks_fts(recommendation_chunks_fts) VALUES('rebuild');
+INSERT INTO source_documents_fts(source_documents_fts) VALUES('rebuild');
+
 DROP TABLE IF EXISTS keep_guidelines;
 VACUUM;
 SQL
