@@ -47,3 +47,6 @@ data/oncology.db-wal
 !data/oncology.deploy.db
 data/oncology.deploy.db-shm
 data/oncology.deploy.db-wal
+
+# supabase local cli artifacts
+supabase/.temp/

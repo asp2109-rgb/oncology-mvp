@@ -11,6 +11,7 @@
     "test:watch": "vitest",
     "ingest:minzdrav": "tsx scripts/ingest-minzdrav.ts",
     "db:init": "tsx scripts/init-db.ts",
+    "db:supabase:check": "tsx scripts/supabase-check.ts --require-supabase",
     "icd10:sync": "tsx scripts/sync-icd10.ts",
     "db:prepare-deploy": "bash scripts/prepare-deploy-db.sh",
     "sources:sync": "tsx scripts/sync-sources.ts",
@@ -21,6 +22,7 @@
   "dependencies": {
     "@react-three/drei": "^10.7.7",
     "@react-three/fiber": "^9.5.0",
+    "@supabase/supabase-js": "^2.97.0",
     "@types/pdfkit": "^0.17.5",
     "better-sqlite3": "^12.6.2",
     "clsx": "^2.1.1",

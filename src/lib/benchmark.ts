@@ -51,7 +51,6 @@ export async function runBenchmark(datasetVersion = "v1"): Promise<BenchmarkRepo
 
   for (const scenario of scenarios) {
     const started = Date.now();
-    // eslint-disable-next-line no-await-in-loop
     const validation = await validateCase(scenario.case_input);
     const elapsed = Date.now() - started;
 
@@ -110,7 +109,7 @@ export async function runBenchmark(datasetVersion = "v1"): Promise<BenchmarkRepo
     created_at: new Date().toISOString(),
   };
 
-  saveBenchmarkRun({
+  await saveBenchmarkRun({
     bench_id: randomUUID(),
     dataset_version: datasetVersion,
     report,

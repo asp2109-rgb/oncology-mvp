@@ -903,7 +903,7 @@ export async function validateCase(
 
   conflicts.push(...clinicalContext.conflicts);
 
-  const getGuidelinesForReferenceDate = (referenceDate: string): AppliedGuidelineVersion[] => {
+  const getGuidelinesForReferenceDate = async (referenceDate: string): Promise<AppliedGuidelineVersion[]> => {
     if (!minzdravSelected) {
       return [];
     }
@@ -914,7 +914,7 @@ export async function validateCase(
       return cached;
     }
 
-    const selected = selectApplicableGuidelines(normalizedCase.diagnosis, normalizedDate, 10, {
+    const selected = await selectApplicableGuidelines(normalizedCase.diagnosis, normalizedDate, 10, {
       icd10_code: normalizedCase.icd10_code,
       icd10_name_ru: normalizedCase.icd10_name_ru,
       nosology_label_ru: normalizedCase.nosology_label_ru,
@@ -926,7 +926,7 @@ export async function validateCase(
   for (const planItem of planItems) {
     const referenceDate = resolvePlanReferenceDate(normalizedCase, planItem);
     retrospectiveDates.add(referenceDate);
-    const planGuidelines = getGuidelinesForReferenceDate(referenceDate);
+    const planGuidelines = await getGuidelinesForReferenceDate(referenceDate);
     for (const guideline of planGuidelines) {
       appliedVersionMap.set(guideline.id, guideline);
     }
@@ -985,7 +985,7 @@ export async function validateCase(
 
   const recommendationReferenceDate = resolveCaseReferenceDate(normalizedCase);
   retrospectiveDates.add(recommendationReferenceDate);
-  const recommendationGuidelines = getGuidelinesForReferenceDate(recommendationReferenceDate);
+  const recommendationGuidelines = await getGuidelinesForReferenceDate(recommendationReferenceDate);
   for (const guideline of recommendationGuidelines) {
     appliedVersionMap.set(guideline.id, guideline);
   }
@@ -1032,9 +1032,12 @@ export async function validateCase(
     .slice(0, 20);
 
   const applied = sortAppliedGuidelines(Array.from(appliedVersionMap.values()));
+  const nearbyCandidates = minzdravSelected
+    ? await selectApplicableGuidelines(diagnosisFocus, recommendationReferenceDate, 12)
+    : [];
   const nearby = minzdravSelected
     ? sortAppliedGuidelines(
-        selectApplicableGuidelines(diagnosisFocus, recommendationReferenceDate, 12).filter(
+        nearbyCandidates.filter(
           (item) => !applied.some((appliedItem) => appliedItem.id === item.id),
         ),
       ).slice(0, 6)
@@ -1096,7 +1099,7 @@ export async function validateCase(
     generated_at: nowIso(),
   };
 
-  const validationRunId = saveValidationRun({
+  const validationRunId = await saveValidationRun({
     case_id: null,
     as_of_date: normalizedCase.as_of_date,
     result,

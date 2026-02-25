@@ -271,8 +271,8 @@ async function main() {
       const sections = buildSections(detail);
       const chunks = buildChunks(item.CodeVersion, sections);
 
-      withTransaction(() => {
-        upsertGuideline({
+      await withTransaction(async () => {
+        await upsertGuideline({
           id: detail.id,
           code: detail.code ?? null,
           version: detail.version ?? null,
@@ -285,7 +285,7 @@ async function main() {
           is_oncology: 1,
         });
 
-        replaceGuidelineSections(
+        await replaceGuidelineSections(
           detail.id,
           sections.map((section) => ({
             guideline_id: detail.id,
@@ -296,7 +296,7 @@ async function main() {
           })),
         );
 
-        replaceRecommendationChunks(detail.id, chunks);
+        await replaceRecommendationChunks(detail.id, chunks);
       });
 
       processed += 1;

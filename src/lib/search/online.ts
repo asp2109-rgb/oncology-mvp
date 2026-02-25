@@ -42,7 +42,7 @@ function portalHit(source: SourceId, query: string, score: number): SearchHit {
 
 async function searchPubMed(query: string, limit: number, asOfDate?: string): Promise<SearchHit[]> {
   const key = `online:pubmed:${query}:${limit}:${asOfDate ?? "none"}`;
-  const cached = readTrialsCache(key);
+  const cached = await readTrialsCache(key);
 
   if (cached && shouldUseCache(cached.fetched_at)) {
     try {
@@ -126,7 +126,7 @@ async function searchPubMed(query: string, limit: number, asOfDate?: string): Pr
     return [portalHit("pubmed", query, 210)];
   }
 
-  upsertTrialsCache(key, ranked);
+  await upsertTrialsCache(key, ranked);
   return ranked;
 }
 

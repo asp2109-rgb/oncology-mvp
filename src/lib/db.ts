@@ -1,106 +1,136 @@
-import fs from "node:fs";
-import path from "node:path";
 import { randomUUID } from "node:crypto";
-import Database from "better-sqlite3";
 import type { BenchmarkReport, SourceId, ValidationResult } from "@/lib/types";
-import { nowIso, safeJsonParse } from "@/lib/utils";
+import { ftsQueryFromText, nowIso, safeJsonParse } from "@/lib/utils";
+import { getSupabaseClient, isSupabaseConfigured } from "@/lib/supabase";
+import * as sqlite from "@/lib/db-sqlite";
 
-type DbInstance = Database.Database;
+export type GuidelineRecord = sqlite.GuidelineRecord;
+export type GuidelineSectionRecord = sqlite.GuidelineSectionRecord;
+export type RecommendationChunkRecord = sqlite.RecommendationChunkRecord;
+export type SourceDocumentRecord = sqlite.SourceDocumentRecord;
+export type LandingLeadRecord = sqlite.LandingLeadRecord;
+export type DoctorFeedbackRecord = sqlite.DoctorFeedbackRecord;
 
-let db: DbInstance | null = null;
+export type DbInstance = ReturnType<typeof sqlite.getDb> | ReturnType<typeof getSupabaseClient>;
+
+const ONCO_DB_PROVIDER = (process.env.ONCO_DB_PROVIDER ?? "supabase").trim().toLowerCase();
+const SUPABASE_CACHE_TTL_MS = 2 * 60 * 1000;
+const SUPABASE_BATCH_SIZE = Math.max(
+  100,
+  Math.min(Number(process.env.SUPABASE_BATCH_SIZE ?? "500") || 500, 2000),
+);
+const STRICT_SUPABASE = (process.env.ONCO_DB_STRICT_SUPABASE ?? "false").trim().toLowerCase() === "true";
+
+let warnedFallback = false;
 let initialized = false;
+let guidelineCache:
+  | {
+      expiresAt: number;
+      rows: Array<{
+        id: string;
+        code: number | null;
+        version: number | null;
+        name: string;
+        publish_date: string | null;
+        status: number;
+        source_url: string;
+        pdf_url: string;
+      }>;
+    }
+  | null = null;
 
-export type GuidelineRecord = {
-  id: string;
-  code: number | null;
-  version: number | null;
-  name: string;
-  publish_date: string | null;
-  status: number;
-  apply_status: string | null;
-  source_url: string;
-  pdf_url: string;
-  is_oncology: number;
-};
-
-export type GuidelineSectionRecord = {
-  guideline_id: string;
-  section_id: string;
-  section_title: string;
-  section_html: string;
-  section_text: string;
-};
-
-export type RecommendationChunkRecord = {
-  chunk_id: string;
-  guideline_id: string;
-  section_id: string;
-  chunk_text: string;
-  tags: string[];
-  evidence_level: string | null;
-  source_anchor: string | null;
-};
-
-export type SourceDocumentRecord = {
-  document_id: string;
-  source: SourceId;
-  title: string;
-  url: string;
-  version: string | null;
-  published_at: string | null;
-  access_level: "open" | "login_required" | "restricted";
-  ingest_status: "downloaded" | "online_only" | "failed";
-  http_status: number | null;
-  failure_reason: string | null;
-  content_text: string;
-  metadata_json: string;
-};
-
-export type LandingLeadRecord = {
-  full_name: string;
-  work_email: string;
-  clinic_name: string;
-  role: string;
-  monthly_cases: number;
-  message: string;
-  consent: number;
-  source: string;
-};
-
-export type DoctorFeedbackRecord = {
-  validation_run_id: string;
-  rating: "up" | "down";
-  comment: string;
-};
-
-function resolveDbPath(): string {
-  const configured = process.env.ONCO_DB_PATH;
-
-  if (configured) {
-    return configured;
+function shouldUseSupabase(): boolean {
+  const requested = ONCO_DB_PROVIDER === "supabase";
+  if (!requested) {
+    return false;
   }
 
-  return path.join(process.cwd(), "data", "oncology.db");
+  const configured = isSupabaseConfigured();
+  if (!configured && STRICT_SUPABASE) {
+    throw new Error(
+      "[onco-db] ONCO_DB_PROVIDER=supabase, но SUPABASE_URL/KEY не заданы и включен строгий режим ONCO_DB_STRICT_SUPABASE=true.",
+    );
+  }
+
+  if (!configured && !warnedFallback) {
+    warnedFallback = true;
+    console.warn(
+      "[onco-db] ONCO_DB_PROVIDER=supabase, но SUPABASE_URL/KEY не заданы. Используется SQLite fallback.",
+    );
+  }
+
+  return configured;
 }
 
-function ensureDir(filePath: string): void {
-  const dir = path.dirname(filePath);
-  fs.mkdirSync(dir, { recursive: true });
+export function getDbProviderInfo(): {
+  requested: "supabase" | "sqlite";
+  active: "supabase" | "sqlite";
+  supabase_configured: boolean;
+} {
+  const requested = ONCO_DB_PROVIDER === "supabase" ? "supabase" : "sqlite";
+  const configured = isSupabaseConfigured();
+  const active = shouldUseSupabase() ? "supabase" : "sqlite";
+  return {
+    requested,
+    active,
+    supabase_configured: configured,
+  };
+}
+
+function invalidateGuidelineCache(): void {
+  guidelineCache = null;
+}
+
+function normalizeDateOnly(value: string | null | undefined): string | null {
+  const raw = String(value ?? "").trim();
+  if (!raw) {
+    return null;
+  }
+
+  const direct = raw.match(/^(\d{4}-\d{2}-\d{2})/);
+  if (direct) {
+    return direct[1];
+  }
+
+  const parsed = Date.parse(raw);
+  if (Number.isNaN(parsed)) {
+    return null;
+  }
+  return new Date(parsed).toISOString().slice(0, 10);
+}
+
+function parseMetadata(value: string): Record<string, unknown> {
+  return safeJsonParse<Record<string, unknown>>(value, {});
+}
+
+function parseTags(value: string[]): string[] {
+  return Array.from(new Set(value.map((item) => item.trim()).filter(Boolean)));
+}
+
+function ensureInitSqlite(): void {
+  sqlite.initDb();
+}
+
+function chunkBy<T>(items: T[], size: number): T[][] {
+  if (items.length <= size) {
+    return [items];
+  }
+
+  const batches: T[][] = [];
+  for (let index = 0; index < items.length; index += size) {
+    batches.push(items.slice(index, index + size));
+  }
+
+  return batches;
 }
 
 export function getDb(): DbInstance {
-  if (db) {
-    return db;
+  if (shouldUseSupabase()) {
+    return getSupabaseClient();
   }
 
-  const dbPath = resolveDbPath();
-  ensureDir(dbPath);
-
-  db = new Database(dbPath);
-  db.pragma("journal_mode = WAL");
-  db.pragma("foreign_keys = ON");
-
-  return db;
+  ensureInitSqlite();
+  return sqlite.getDb();
 }
 
 export function initDb(): void {
@@ -108,684 +138,983 @@ export function initDb(): void {
     return;
   }
 
-  const database = getDb();
-
-  database.exec(`
-    CREATE TABLE IF NOT EXISTS guidelines (
-      id TEXT PRIMARY KEY,
-      code INTEGER,
-      version INTEGER,
-      name TEXT NOT NULL,
-      publish_date TEXT,
-      status INTEGER NOT NULL,
-      apply_status TEXT,
-      source_url TEXT NOT NULL,
-      pdf_url TEXT NOT NULL,
-      is_oncology INTEGER NOT NULL DEFAULT 1,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_guidelines_name ON guidelines(name);
-    CREATE INDEX IF NOT EXISTS idx_guidelines_publish_date ON guidelines(publish_date);
-    CREATE INDEX IF NOT EXISTS idx_guidelines_status ON guidelines(status);
-    CREATE INDEX IF NOT EXISTS idx_guidelines_code ON guidelines(code);
-
-    CREATE TABLE IF NOT EXISTS guideline_sections (
-      guideline_id TEXT NOT NULL,
-      section_id TEXT NOT NULL,
-      section_title TEXT NOT NULL,
-      section_html TEXT NOT NULL,
-      section_text TEXT NOT NULL,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      PRIMARY KEY (guideline_id, section_id),
-      FOREIGN KEY (guideline_id) REFERENCES guidelines(id) ON DELETE CASCADE
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_sections_guideline ON guideline_sections(guideline_id);
-    CREATE INDEX IF NOT EXISTS idx_sections_section_id ON guideline_sections(section_id);
-
-    CREATE TABLE IF NOT EXISTS recommendation_chunks (
-      chunk_id TEXT PRIMARY KEY,
-      guideline_id TEXT NOT NULL,
-      section_id TEXT NOT NULL,
-      chunk_text TEXT NOT NULL,
-      tags TEXT NOT NULL,
-      evidence_level TEXT,
-      source_anchor TEXT,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (guideline_id) REFERENCES guidelines(id) ON DELETE CASCADE
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_chunks_guideline ON recommendation_chunks(guideline_id);
-    CREATE INDEX IF NOT EXISTS idx_chunks_section ON recommendation_chunks(section_id);
-
-    CREATE VIRTUAL TABLE IF NOT EXISTS recommendation_chunks_fts
-    USING fts5(chunk_id UNINDEXED, chunk_text, tags);
-
-    CREATE TABLE IF NOT EXISTS cases (
-      case_id TEXT PRIMARY KEY,
-      source TEXT,
-      diagnosis TEXT NOT NULL,
-      stage TEXT,
-      biomarkers TEXT NOT NULL,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    );
-
-    CREATE TABLE IF NOT EXISTS case_events (
-      event_id TEXT PRIMARY KEY,
-      case_id TEXT NOT NULL,
-      event_date TEXT NOT NULL,
-      event_type TEXT NOT NULL,
-      payload_json TEXT NOT NULL,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (case_id) REFERENCES cases(case_id) ON DELETE CASCADE
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_case_events_case ON case_events(case_id);
-    CREATE INDEX IF NOT EXISTS idx_case_events_date ON case_events(event_date);
-
-    CREATE TABLE IF NOT EXISTS validation_runs (
-      run_id TEXT PRIMARY KEY,
-      case_id TEXT,
-      as_of_date TEXT NOT NULL,
-      result_json TEXT NOT NULL,
-      latency_ms INTEGER NOT NULL,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (case_id) REFERENCES cases(case_id) ON DELETE SET NULL
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_validation_created ON validation_runs(created_at DESC);
-
-    CREATE TABLE IF NOT EXISTS doctor_feedback (
-      feedback_id TEXT PRIMARY KEY,
-      validation_run_id TEXT NOT NULL,
-      rating TEXT NOT NULL CHECK(rating IN ('up', 'down')),
-      comment TEXT NOT NULL DEFAULT '',
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (validation_run_id) REFERENCES validation_runs(run_id) ON DELETE CASCADE
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_doctor_feedback_validation_run_id ON doctor_feedback(validation_run_id);
-    CREATE INDEX IF NOT EXISTS idx_doctor_feedback_created ON doctor_feedback(created_at DESC);
-
-    CREATE TABLE IF NOT EXISTS benchmark_runs (
-      bench_id TEXT PRIMARY KEY,
-      dataset_version TEXT NOT NULL,
-      metrics_json TEXT NOT NULL,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_benchmark_created ON benchmark_runs(created_at DESC);
-
-    CREATE TABLE IF NOT EXISTS landing_leads (
-      lead_id TEXT PRIMARY KEY,
-      full_name TEXT NOT NULL,
-      work_email TEXT NOT NULL,
-      clinic_name TEXT NOT NULL,
-      role TEXT NOT NULL,
-      monthly_cases INTEGER NOT NULL,
-      message TEXT NOT NULL DEFAULT '',
-      consent INTEGER NOT NULL DEFAULT 1,
-      source TEXT NOT NULL DEFAULT 'landing',
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_landing_leads_created_at ON landing_leads(created_at DESC);
-    CREATE INDEX IF NOT EXISTS idx_landing_leads_work_email ON landing_leads(work_email);
-
-    CREATE TABLE IF NOT EXISTS trials_cache (
-      query_key TEXT PRIMARY KEY,
-      fetched_at TEXT NOT NULL,
-      payload_json TEXT NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS source_documents (
-      document_id TEXT PRIMARY KEY,
-      source TEXT NOT NULL,
-      title TEXT NOT NULL,
-      url TEXT NOT NULL,
-      version TEXT,
-      published_at TEXT,
-      access_level TEXT NOT NULL DEFAULT 'open',
-      ingest_status TEXT NOT NULL,
-      http_status INTEGER,
-      failure_reason TEXT,
-      content_text TEXT NOT NULL DEFAULT '',
-      metadata_json TEXT NOT NULL DEFAULT '{}',
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_source_documents_source ON source_documents(source);
-    CREATE INDEX IF NOT EXISTS idx_source_documents_status ON source_documents(ingest_status);
-    CREATE INDEX IF NOT EXISTS idx_source_documents_updated ON source_documents(updated_at DESC);
-
-    CREATE VIRTUAL TABLE IF NOT EXISTS source_documents_fts
-    USING fts5(document_id UNINDEXED, source, title, content_text, keywords);
-
-    CREATE TABLE IF NOT EXISTS source_sync_logs (
-      log_id TEXT PRIMARY KEY,
-      source TEXT NOT NULL,
-      url TEXT NOT NULL,
-      attempted_at TEXT NOT NULL,
-      status TEXT NOT NULL,
-      http_status INTEGER,
-      failure_reason TEXT,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_source_sync_logs_source ON source_sync_logs(source);
-    CREATE INDEX IF NOT EXISTS idx_source_sync_logs_attempted ON source_sync_logs(attempted_at DESC);
-  `);
+  if (!shouldUseSupabase()) {
+    ensureInitSqlite();
+  }
 
   initialized = true;
 }
 
-export function withTransaction<T>(fn: () => T): T {
-  const database = getDb();
+export async function withTransaction<T>(fn: () => Promise<T> | T): Promise<T> {
   initDb();
-  const transaction = database.transaction(fn);
-  return transaction();
+  // Supabase/PostgREST does not expose client-side transactions in this layer.
+  // Use an explicit SQL function for true ACID batches when needed.
+  // For SQLite fallback we keep API behavior consistent and execute callback directly.
+  return await fn();
 }
 
-export function upsertGuideline(record: GuidelineRecord): void {
+export async function upsertGuideline(record: GuidelineRecord): Promise<void> {
   initDb();
-  const database = getDb();
 
-  database
-    .prepare(
-      `
-      INSERT INTO guidelines (
-        id, code, version, name, publish_date, status, apply_status, source_url, pdf_url, is_oncology
-      ) VALUES (
-        @id, @code, @version, @name, @publish_date, @status, @apply_status, @source_url, @pdf_url, @is_oncology
-      )
-      ON CONFLICT(id) DO UPDATE SET
-        code = excluded.code,
-        version = excluded.version,
-        name = excluded.name,
-        publish_date = excluded.publish_date,
-        status = excluded.status,
-        apply_status = excluded.apply_status,
-        source_url = excluded.source_url,
-        pdf_url = excluded.pdf_url,
-        is_oncology = excluded.is_oncology;
-    `,
-    )
-    .run(record);
+  if (!shouldUseSupabase()) {
+    sqlite.upsertGuideline(record);
+    return;
+  }
+
+  const supabase = getSupabaseClient();
+  const payload = {
+    id: record.id,
+    code: record.code,
+    version: record.version,
+    name: record.name,
+    publish_date: normalizeDateOnly(record.publish_date),
+    status: record.status,
+    apply_status: record.apply_status,
+    source_url: record.source_url,
+    pdf_url: record.pdf_url,
+    is_oncology: Boolean(record.is_oncology),
+    updated_at: nowIso(),
+  };
+
+  const { error } = await supabase.from("guidelines").upsert(payload, { onConflict: "id" });
+  if (error) {
+    throw new Error(`Supabase upsertGuideline failed: ${error.message}`);
+  }
+
+  invalidateGuidelineCache();
 }
 
-export function replaceGuidelineSections(guidelineId: string, sections: GuidelineSectionRecord[]): void {
+export async function replaceGuidelineSections(
+  guidelineId: string,
+  sections: GuidelineSectionRecord[],
+): Promise<void> {
   initDb();
-  const database = getDb();
 
-  database.prepare("DELETE FROM guideline_sections WHERE guideline_id = ?").run(guidelineId);
+  if (!shouldUseSupabase()) {
+    sqlite.replaceGuidelineSections(guidelineId, sections);
+    return;
+  }
 
-  const insert = database.prepare(`
-    INSERT INTO guideline_sections (
-      guideline_id, section_id, section_title, section_html, section_text
-    ) VALUES (
-      @guideline_id, @section_id, @section_title, @section_html, @section_text
-    )
-    ON CONFLICT(guideline_id, section_id) DO UPDATE SET
-      section_title = excluded.section_title,
-      section_html = excluded.section_html,
-      section_text = excluded.section_text;
-  `);
+  const supabase = getSupabaseClient();
+  const { error: deleteError } = await supabase
+    .from("guideline_sections")
+    .delete()
+    .eq("guideline_id", guidelineId);
 
-  for (const section of sections) {
-    insert.run(section);
+  if (deleteError) {
+    throw new Error(`Supabase replaceGuidelineSections(delete) failed: ${deleteError.message}`);
+  }
+
+  if (!sections.length) {
+    return;
+  }
+
+  const payload = sections.map((section) => ({ ...section }));
+  for (const batch of chunkBy(payload, SUPABASE_BATCH_SIZE)) {
+    const { error: insertError } = await supabase.from("guideline_sections").insert(batch);
+    if (insertError) {
+      throw new Error(`Supabase replaceGuidelineSections(insert) failed: ${insertError.message}`);
+    }
   }
 }
 
-export function replaceRecommendationChunks(
+export async function replaceRecommendationChunks(
   guidelineId: string,
   chunks: RecommendationChunkRecord[],
-): void {
+): Promise<void> {
   initDb();
-  const database = getDb();
 
-  const existingChunks = database
-    .prepare("SELECT chunk_id FROM recommendation_chunks WHERE guideline_id = ?")
-    .all(guidelineId) as Array<{ chunk_id: string }>;
-
-  const deleteFts = database.prepare("DELETE FROM recommendation_chunks_fts WHERE chunk_id = ?");
-  for (const row of existingChunks) {
-    deleteFts.run(row.chunk_id);
+  if (!shouldUseSupabase()) {
+    sqlite.replaceRecommendationChunks(guidelineId, chunks);
+    return;
   }
 
-  database.prepare("DELETE FROM recommendation_chunks WHERE guideline_id = ?").run(guidelineId);
+  const supabase = getSupabaseClient();
+  const { error: deleteError } = await supabase
+    .from("recommendation_chunks")
+    .delete()
+    .eq("guideline_id", guidelineId);
 
-  const insertChunk = database.prepare(`
-    INSERT INTO recommendation_chunks (
-      chunk_id, guideline_id, section_id, chunk_text, tags, evidence_level, source_anchor
-    ) VALUES (
-      @chunk_id, @guideline_id, @section_id, @chunk_text, @tags, @evidence_level, @source_anchor
-    );
-  `);
+  if (deleteError) {
+    throw new Error(`Supabase replaceRecommendationChunks(delete) failed: ${deleteError.message}`);
+  }
 
-  const insertFts = database.prepare(
-    "INSERT INTO recommendation_chunks_fts (chunk_id, chunk_text, tags) VALUES (?, ?, ?)",
-  );
+  if (!chunks.length) {
+    return;
+  }
 
-  for (const chunk of chunks) {
-    insertChunk.run({
-      ...chunk,
-      tags: JSON.stringify(chunk.tags),
-    });
+  const payload = chunks.map((chunk) => ({
+    ...chunk,
+    tags: chunk.tags,
+  }));
 
-    insertFts.run(chunk.chunk_id, chunk.chunk_text, chunk.tags.join(" "));
+  for (const batch of chunkBy(payload, SUPABASE_BATCH_SIZE)) {
+    const { error: insertError } = await supabase.from("recommendation_chunks").insert(batch);
+    if (insertError) {
+      throw new Error(`Supabase replaceRecommendationChunks(insert) failed: ${insertError.message}`);
+    }
   }
 }
 
-export function getGuidelineCounts(): { guidelines: number; chunks: number } {
+export async function getGuidelineCounts(): Promise<{ guidelines: number; chunks: number }> {
   initDb();
-  const database = getDb();
 
-  const guidelineRow = database.prepare("SELECT COUNT(*) as count FROM guidelines").get() as {
-    count: number;
-  };
-  const chunkRow = database.prepare("SELECT COUNT(*) as count FROM recommendation_chunks").get() as {
-    count: number;
-  };
+  if (!shouldUseSupabase()) {
+    return sqlite.getGuidelineCounts();
+  }
+
+  const supabase = getSupabaseClient();
+
+  const { data: rpcData, error: rpcError } = await supabase.rpc("onco_get_guideline_counts");
+  if (!rpcError && Array.isArray(rpcData) && rpcData.length) {
+    const row = rpcData[0] as { guidelines?: number; chunks?: number };
+    return {
+      guidelines: Number(row.guidelines ?? 0),
+      chunks: Number(row.chunks ?? 0),
+    };
+  }
+
+  const [{ count: guidelineCount, error: gErr }, { count: chunkCount, error: cErr }] = await Promise.all([
+    supabase.from("guidelines").select("id", { head: true, count: "exact" }),
+    supabase.from("recommendation_chunks").select("chunk_id", { head: true, count: "exact" }),
+  ]);
+
+  if (gErr || cErr) {
+    throw new Error(
+      `Supabase getGuidelineCounts failed: ${gErr?.message ?? cErr?.message ?? rpcError?.message ?? "unknown error"}`,
+    );
+  }
 
   return {
-    guidelines: guidelineRow.count,
-    chunks: chunkRow.count,
+    guidelines: Number(guidelineCount ?? 0),
+    chunks: Number(chunkCount ?? 0),
   };
 }
 
-export function saveValidationRun(params: {
+export async function saveValidationRun(params: {
   run_id?: string;
   case_id: string | null;
   as_of_date: string;
   result: ValidationResult;
   latency_ms: number;
-}): string {
+}): Promise<string> {
   initDb();
-  const database = getDb();
+
   const runId = params.run_id ?? randomUUID();
 
-  database
-    .prepare(
-      `
-    INSERT INTO validation_runs (
-      run_id, case_id, as_of_date, result_json, latency_ms
-    ) VALUES (
-      @run_id, @case_id, @as_of_date, @result_json, @latency_ms
-    )
-  `,
-    )
-    .run({
+  if (!shouldUseSupabase()) {
+    return sqlite.saveValidationRun({
       ...params,
       run_id: runId,
-      result_json: JSON.stringify(params.result),
     });
+  }
+
+  const supabase = getSupabaseClient();
+  const { error } = await supabase.from("validation_runs").insert({
+    run_id: runId,
+    case_id: params.case_id,
+    as_of_date: normalizeDateOnly(params.as_of_date),
+    result_json: params.result,
+    latency_ms: params.latency_ms,
+  });
+
+  if (error) {
+    throw new Error(`Supabase saveValidationRun failed: ${error.message}`);
+  }
 
   return runId;
 }
 
-export function saveDoctorFeedback(record: DoctorFeedbackRecord): { feedback_id: string; created_at: string } {
+export async function saveDoctorFeedback(
+  record: DoctorFeedbackRecord,
+): Promise<{ feedback_id: string; created_at: string }> {
   initDb();
-  const database = getDb();
+
+  if (!shouldUseSupabase()) {
+    return sqlite.saveDoctorFeedback(record);
+  }
+
   const feedback_id = randomUUID();
   const created_at = nowIso();
 
-  database
-    .prepare(
-      `
-      INSERT INTO doctor_feedback (
-        feedback_id,
-        validation_run_id,
-        rating,
-        comment,
-        created_at
-      ) VALUES (
-        @feedback_id,
-        @validation_run_id,
-        @rating,
-        @comment,
-        @created_at
-      )
-    `,
-    )
-    .run({
-      feedback_id,
-      created_at,
-      ...record,
-    });
-
-  return {
+  const supabase = getSupabaseClient();
+  const { error } = await supabase.from("doctor_feedback").insert({
     feedback_id,
+    validation_run_id: record.validation_run_id,
+    rating: record.rating,
+    comment: record.comment,
     created_at,
-  };
+  });
+
+  if (error) {
+    throw new Error(`Supabase saveDoctorFeedback failed: ${error.message}`);
+  }
+
+  return { feedback_id, created_at };
 }
 
-export function saveBenchmarkRun(params: {
+export async function saveBenchmarkRun(params: {
   bench_id: string;
   dataset_version: string;
   report: BenchmarkReport;
-}): void {
+}): Promise<void> {
   initDb();
-  const database = getDb();
 
-  database
-    .prepare(
-      `
-    INSERT INTO benchmark_runs (
-      bench_id, dataset_version, metrics_json
-    ) VALUES (
-      @bench_id, @dataset_version, @metrics_json
-    )
-  `,
-    )
-    .run({
-      ...params,
-      metrics_json: JSON.stringify(params.report),
-    });
+  if (!shouldUseSupabase()) {
+    sqlite.saveBenchmarkRun(params);
+    return;
+  }
+
+  const supabase = getSupabaseClient();
+  const { error } = await supabase.from("benchmark_runs").insert({
+    bench_id: params.bench_id,
+    dataset_version: params.dataset_version,
+    metrics_json: params.report,
+  });
+
+  if (error) {
+    throw new Error(`Supabase saveBenchmarkRun failed: ${error.message}`);
+  }
 }
 
-export function saveLandingLead(record: LandingLeadRecord): { lead_id: string; created_at: string } {
+export async function saveLandingLead(
+  record: LandingLeadRecord,
+): Promise<{ lead_id: string; created_at: string }> {
   initDb();
-  const database = getDb();
+
+  if (!shouldUseSupabase()) {
+    return sqlite.saveLandingLead(record);
+  }
 
   const lead_id = randomUUID();
   const created_at = nowIso();
 
-  database
-    .prepare(
-      `
-      INSERT INTO landing_leads (
-        lead_id,
-        full_name,
-        work_email,
-        clinic_name,
-        role,
-        monthly_cases,
-        message,
-        consent,
-        source,
-        created_at
-      ) VALUES (
-        @lead_id,
-        @full_name,
-        @work_email,
-        @clinic_name,
-        @role,
-        @monthly_cases,
-        @message,
-        @consent,
-        @source,
-        @created_at
-      )
-    `,
-    )
-    .run({
-      lead_id,
-      created_at,
-      ...record,
-    });
-
-  return {
+  const supabase = getSupabaseClient();
+  const { error } = await supabase.from("landing_leads").insert({
     lead_id,
+    full_name: record.full_name,
+    work_email: record.work_email,
+    clinic_name: record.clinic_name,
+    role: record.role,
+    monthly_cases: record.monthly_cases,
+    message: record.message,
+    consent: Boolean(record.consent),
+    source: record.source,
     created_at,
-  };
+  });
+
+  if (error) {
+    throw new Error(`Supabase saveLandingLead failed: ${error.message}`);
+  }
+
+  return { lead_id, created_at };
 }
 
-export function getLatestBenchmarkRun(): BenchmarkReport | null {
+export async function getLatestBenchmarkRun(): Promise<BenchmarkReport | null> {
   initDb();
-  const database = getDb();
 
-  const row = database
-    .prepare("SELECT metrics_json FROM benchmark_runs ORDER BY created_at DESC LIMIT 1")
-    .get() as { metrics_json: string } | undefined;
+  if (!shouldUseSupabase()) {
+    return sqlite.getLatestBenchmarkRun();
+  }
 
-  if (!row) {
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase
+    .from("benchmark_runs")
+    .select("metrics_json")
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(`Supabase getLatestBenchmarkRun failed: ${error.message}`);
+  }
+
+  if (!data) {
     return null;
   }
 
-  return safeJsonParse<BenchmarkReport | null>(row.metrics_json, null);
+  return safeJsonParse<BenchmarkReport | null>(JSON.stringify(data.metrics_json), null);
 }
 
-export function upsertTrialsCache(queryKey: string, payload: unknown): void {
+export async function upsertTrialsCache(queryKey: string, payload: unknown): Promise<void> {
   initDb();
-  const database = getDb();
 
-  database
-    .prepare(
-      `
-      INSERT INTO trials_cache (query_key, fetched_at, payload_json)
-      VALUES (?, ?, ?)
-      ON CONFLICT(query_key) DO UPDATE SET
-        fetched_at = excluded.fetched_at,
-        payload_json = excluded.payload_json
-    `,
-    )
-    .run(queryKey, nowIso(), JSON.stringify(payload));
-}
-
-export function readTrialsCache(queryKey: string): { fetched_at: string; payload_json: string } | null {
-  initDb();
-  const database = getDb();
-
-  const row = database
-    .prepare("SELECT fetched_at, payload_json FROM trials_cache WHERE query_key = ?")
-    .get(queryKey) as { fetched_at: string; payload_json: string } | undefined;
-
-  return row ?? null;
-}
-
-export function deleteSourceDocumentsBySource(source: SourceId): void {
-  initDb();
-  const database = getDb();
-
-  const existing = database
-    .prepare("SELECT document_id FROM source_documents WHERE source = ?")
-    .all(source) as Array<{ document_id: string }>;
-
-  const deleteFts = database.prepare("DELETE FROM source_documents_fts WHERE document_id = ?");
-  for (const row of existing) {
-    deleteFts.run(row.document_id);
+  if (!shouldUseSupabase()) {
+    sqlite.upsertTrialsCache(queryKey, payload);
+    return;
   }
 
-  database.prepare("DELETE FROM source_documents WHERE source = ?").run(source);
+  const supabase = getSupabaseClient();
+  const { error } = await supabase.from("trials_cache").upsert(
+    {
+      query_key: queryKey,
+      fetched_at: nowIso(),
+      payload_json: payload,
+    },
+    { onConflict: "query_key" },
+  );
+
+  if (error) {
+    throw new Error(`Supabase upsertTrialsCache failed: ${error.message}`);
+  }
 }
 
-export function upsertSourceDocument(
+export async function readTrialsCache(
+  queryKey: string,
+): Promise<{ fetched_at: string; payload_json: string } | null> {
+  initDb();
+
+  if (!shouldUseSupabase()) {
+    return sqlite.readTrialsCache(queryKey);
+  }
+
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase
+    .from("trials_cache")
+    .select("fetched_at,payload_json")
+    .eq("query_key", queryKey)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(`Supabase readTrialsCache failed: ${error.message}`);
+  }
+
+  if (!data) {
+    return null;
+  }
+
+  return {
+    fetched_at: String(data.fetched_at),
+    payload_json: JSON.stringify(data.payload_json),
+  };
+}
+
+export async function deleteSourceDocumentsBySource(source: SourceId): Promise<void> {
+  initDb();
+
+  if (!shouldUseSupabase()) {
+    sqlite.deleteSourceDocumentsBySource(source);
+    return;
+  }
+
+  const supabase = getSupabaseClient();
+  const { error } = await supabase.from("source_documents").delete().eq("source", source);
+
+  if (error) {
+    throw new Error(`Supabase deleteSourceDocumentsBySource failed: ${error.message}`);
+  }
+}
+
+export async function upsertSourceDocument(
   record: SourceDocumentRecord,
   keywords: string[] = [],
-): void {
+): Promise<void> {
   initDb();
-  const database = getDb();
 
-  database
-    .prepare(
-      `
-      INSERT INTO source_documents (
-        document_id,
-        source,
-        title,
-        url,
-        version,
-        published_at,
-        access_level,
-        ingest_status,
-        http_status,
-        failure_reason,
-        content_text,
-        metadata_json,
-        updated_at
-      ) VALUES (
-        @document_id,
-        @source,
-        @title,
-        @url,
-        @version,
-        @published_at,
-        @access_level,
-        @ingest_status,
-        @http_status,
-        @failure_reason,
-        @content_text,
-        @metadata_json,
-        @updated_at
-      )
-      ON CONFLICT(document_id) DO UPDATE SET
-        source = excluded.source,
-        title = excluded.title,
-        url = excluded.url,
-        version = excluded.version,
-        published_at = excluded.published_at,
-        access_level = excluded.access_level,
-        ingest_status = excluded.ingest_status,
-        http_status = excluded.http_status,
-        failure_reason = excluded.failure_reason,
-        content_text = excluded.content_text,
-        metadata_json = excluded.metadata_json,
-        updated_at = excluded.updated_at
-    `,
-    )
-    .run({
-      ...record,
+  if (!shouldUseSupabase()) {
+    sqlite.upsertSourceDocument(record, keywords);
+    return;
+  }
+
+  const supabase = getSupabaseClient();
+  const { error } = await supabase.from("source_documents").upsert(
+    {
+      document_id: record.document_id,
+      source: record.source,
+      title: record.title,
+      url: record.url,
+      version: record.version,
+      published_at: normalizeDateOnly(record.published_at),
+      access_level: record.access_level,
+      ingest_status: record.ingest_status,
+      http_status: record.http_status,
+      failure_reason: record.failure_reason,
+      content_text: record.content_text,
+      metadata_json: parseMetadata(record.metadata_json),
+      keywords: parseTags(keywords).join(" "),
       updated_at: nowIso(),
-    });
+    },
+    { onConflict: "document_id" },
+  );
 
-  database.prepare("DELETE FROM source_documents_fts WHERE document_id = ?").run(record.document_id);
-  database
-    .prepare(
-      `
-      INSERT INTO source_documents_fts (document_id, source, title, content_text, keywords)
-      VALUES (?, ?, ?, ?, ?)
-    `,
-    )
-    .run(
-      record.document_id,
-      record.source,
-      record.title,
-      record.content_text,
-      Array.from(new Set(keywords)).join(" "),
-    );
+  if (error) {
+    throw new Error(`Supabase upsertSourceDocument failed: ${error.message}`);
+  }
 }
 
-export function logSourceSyncAttempt(params: {
+export async function logSourceSyncAttempt(params: {
   source: SourceId;
   url: string;
   status: "downloaded" | "online_only" | "failed";
   http_status?: number | null;
   failure_reason?: string | null;
   attempted_at?: string;
-}): void {
+}): Promise<void> {
   initDb();
-  const database = getDb();
 
-  database
-    .prepare(
-      `
-      INSERT INTO source_sync_logs (
-        log_id,
-        source,
-        url,
-        attempted_at,
-        status,
-        http_status,
-        failure_reason
-      ) VALUES (?, ?, ?, ?, ?, ?, ?)
-    `,
-    )
-    .run(
-      randomUUID(),
-      params.source,
-      params.url,
-      params.attempted_at ?? nowIso(),
-      params.status,
-      params.http_status ?? null,
-      params.failure_reason ?? null,
-    );
+  if (!shouldUseSupabase()) {
+    sqlite.logSourceSyncAttempt(params);
+    return;
+  }
+
+  const supabase = getSupabaseClient();
+  const { error } = await supabase.from("source_sync_logs").insert({
+    log_id: randomUUID(),
+    source: params.source,
+    url: params.url,
+    attempted_at: params.attempted_at ?? nowIso(),
+    status: params.status,
+    http_status: params.http_status ?? null,
+    failure_reason: params.failure_reason ?? null,
+  });
+
+  if (error) {
+    throw new Error(`Supabase logSourceSyncAttempt failed: ${error.message}`);
+  }
 }
 
-export function listSourceStatus(): Array<{
-  source: SourceId;
-  downloaded_count: number;
-  online_only_count: number;
-  failed_count: number;
-  last_indexed_at: string | null;
-  last_attempt_at: string | null;
-  last_attempt_status: string | null;
-  last_attempt_url: string | null;
-  last_attempt_http_status: number | null;
-  last_attempt_failure_reason: string | null;
-}> {
+export async function listSourceStatus(): Promise<
+  Array<{
+    source: SourceId;
+    downloaded_count: number;
+    online_only_count: number;
+    failed_count: number;
+    last_indexed_at: string | null;
+    last_attempt_at: string | null;
+    last_attempt_status: string | null;
+    last_attempt_url: string | null;
+    last_attempt_http_status: number | null;
+    last_attempt_failure_reason: string | null;
+  }>
+> {
   initDb();
-  const database = getDb();
 
-  const countsRows = database
-    .prepare(
-      `
-      SELECT
-        source,
-        SUM(CASE WHEN ingest_status = 'downloaded' THEN 1 ELSE 0 END) AS downloaded_count,
-        SUM(CASE WHEN ingest_status = 'online_only' THEN 1 ELSE 0 END) AS online_only_count,
-        SUM(CASE WHEN ingest_status = 'failed' THEN 1 ELSE 0 END) AS failed_count,
-        MAX(updated_at) AS last_indexed_at
-      FROM source_documents
-      GROUP BY source
-    `,
-    )
-    .all() as Array<Record<string, unknown>>;
+  if (!shouldUseSupabase()) {
+    return sqlite.listSourceStatus();
+  }
 
-  const lastAttemptRows = database
-    .prepare(
-      `
-      SELECT l.source, l.attempted_at, l.status, l.url, l.http_status, l.failure_reason
-      FROM source_sync_logs l
-      INNER JOIN (
-        SELECT source, MAX(attempted_at) AS attempted_at
-        FROM source_sync_logs
-        GROUP BY source
-      ) latest
-        ON latest.source = l.source
-       AND latest.attempted_at = l.attempted_at
-    `,
-    )
-    .all() as Array<Record<string, unknown>>;
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase.rpc("onco_list_source_status");
 
-  const countsBySource = new Map(
-    countsRows.map((row) => [
-      String(row.source),
-      {
-        downloaded_count: Number(row.downloaded_count ?? 0),
-        online_only_count: Number(row.online_only_count ?? 0),
-        failed_count: Number(row.failed_count ?? 0),
-        last_indexed_at: row.last_indexed_at ? String(row.last_indexed_at) : null,
-      },
-    ]),
-  );
+  if (error) {
+    throw new Error(`Supabase listSourceStatus failed: ${error.message}`);
+  }
 
-  const attemptsBySource = new Map(
-    lastAttemptRows.map((row) => [
-      String(row.source),
-      {
-        last_attempt_at: row.attempted_at ? String(row.attempted_at) : null,
-        last_attempt_status: row.status ? String(row.status) : null,
-        last_attempt_url: row.url ? String(row.url) : null,
-        last_attempt_http_status:
-          row.http_status === null || row.http_status === undefined ? null : Number(row.http_status),
-        last_attempt_failure_reason: row.failure_reason ? String(row.failure_reason) : null,
-      },
-    ]),
-  );
-
-  const sources = new Set<string>([...countsBySource.keys(), ...attemptsBySource.keys()]);
-  return Array.from(sources).map((source) => ({
-    source: source as SourceId,
-    downloaded_count: countsBySource.get(source)?.downloaded_count ?? 0,
-    online_only_count: countsBySource.get(source)?.online_only_count ?? 0,
-    failed_count: countsBySource.get(source)?.failed_count ?? 0,
-    last_indexed_at: countsBySource.get(source)?.last_indexed_at ?? null,
-    last_attempt_at: attemptsBySource.get(source)?.last_attempt_at ?? null,
-    last_attempt_status: attemptsBySource.get(source)?.last_attempt_status ?? null,
-    last_attempt_url: attemptsBySource.get(source)?.last_attempt_url ?? null,
-    last_attempt_http_status: attemptsBySource.get(source)?.last_attempt_http_status ?? null,
-    last_attempt_failure_reason: attemptsBySource.get(source)?.last_attempt_failure_reason ?? null,
+  return (data ?? []).map((row: Record<string, unknown>) => ({
+    source: String(row.source) as SourceId,
+    downloaded_count: Number(row.downloaded_count ?? 0),
+    online_only_count: Number(row.online_only_count ?? 0),
+    failed_count: Number(row.failed_count ?? 0),
+    last_indexed_at: row.last_indexed_at ? String(row.last_indexed_at) : null,
+    last_attempt_at: row.last_attempt_at ? String(row.last_attempt_at) : null,
+    last_attempt_status: row.last_attempt_status ? String(row.last_attempt_status) : null,
+    last_attempt_url: row.last_attempt_url ? String(row.last_attempt_url) : null,
+    last_attempt_http_status:
+      row.last_attempt_http_status === null || row.last_attempt_http_status === undefined
+        ? null
+        : Number(row.last_attempt_http_status),
+    last_attempt_failure_reason: row.last_attempt_failure_reason ? String(row.last_attempt_failure_reason) : null,
   }));
+}
+
+export async function listRecentMinzdravGuidelines(
+  limit = 600,
+): Promise<Array<{ id: string; name: string; publish_date: string | null; source_url: string; sample_chunk: string | null }>> {
+  initDb();
+
+  if (!shouldUseSupabase()) {
+    const db = sqlite.getDb();
+    const rows = db
+      .prepare(
+        `
+        SELECT
+          g.id,
+          g.name,
+          g.publish_date,
+          g.source_url,
+          (
+            SELECT rc.chunk_text
+            FROM recommendation_chunks rc
+            WHERE rc.guideline_id = g.id
+            ORDER BY rc.chunk_id ASC
+            LIMIT 1
+          ) AS sample_chunk
+        FROM guidelines g
+        ORDER BY g.publish_date DESC
+        LIMIT ?
+      `,
+      )
+      .all(limit) as Array<{
+      id: string;
+      name: string;
+      publish_date: string | null;
+      source_url: string;
+      sample_chunk: string | null;
+    }>;
+
+    return rows;
+  }
+
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase.rpc("onco_list_recent_minzdrav", { limit_rows: limit });
+
+  if (error) {
+    throw new Error(`Supabase listRecentMinzdravGuidelines failed: ${error.message}`);
+  }
+
+  return (data ?? []).map((row: Record<string, unknown>) => ({
+    id: String(row.id),
+    name: String(row.name),
+    publish_date: row.publish_date ? String(row.publish_date) : null,
+    source_url: String(row.source_url ?? ""),
+    sample_chunk: row.sample_chunk ? String(row.sample_chunk) : null,
+  }));
+}
+
+export async function listGuidelinesRaw(
+  limit = 5000,
+): Promise<
+  Array<{
+    id: string;
+    code: number | null;
+    version: number | null;
+    name: string;
+    publish_date: string | null;
+    status: number;
+    source_url: string;
+    pdf_url: string;
+  }>
+> {
+  initDb();
+
+  if (!shouldUseSupabase()) {
+    const db = sqlite.getDb();
+    const rows = db
+      .prepare(
+        `
+      SELECT id, code, version, name, publish_date, status, source_url, pdf_url
+      FROM guidelines
+      ORDER BY publish_date DESC
+      LIMIT ?
+    `,
+      )
+      .all(limit) as Array<{
+      id: string;
+      code: number | null;
+      version: number | null;
+      name: string;
+      publish_date: string | null;
+      status: number;
+      source_url: string;
+      pdf_url: string;
+    }>;
+
+    return rows;
+  }
+
+  if (guidelineCache && guidelineCache.expiresAt > Date.now() && guidelineCache.rows.length <= limit) {
+    return guidelineCache.rows.slice(0, limit);
+  }
+
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase
+    .from("guidelines")
+    .select("id, code, version, name, publish_date, status, source_url, pdf_url")
+    .order("publish_date", { ascending: false, nullsFirst: false })
+    .limit(Math.max(limit, 1000));
+
+  if (error) {
+    throw new Error(`Supabase listGuidelinesRaw failed: ${error.message}`);
+  }
+
+  const rows = (data ?? []).map((row) => ({
+    id: String(row.id),
+    code: row.code === null || row.code === undefined ? null : Number(row.code),
+    version: row.version === null || row.version === undefined ? null : Number(row.version),
+    name: String(row.name),
+    publish_date: row.publish_date ? String(row.publish_date) : null,
+    status: Number(row.status ?? 0),
+    source_url: String(row.source_url ?? ""),
+    pdf_url: String(row.pdf_url ?? ""),
+  }));
+
+  guidelineCache = {
+    rows,
+    expiresAt: Date.now() + SUPABASE_CACHE_TTL_MS,
+  };
+
+  return rows.slice(0, limit);
+}
+
+export async function listGuidelineSourcesWithSectionCounts(
+  limit = 500,
+): Promise<
+  Array<{
+    id: string;
+    name: string;
+    publish_date: string | null;
+    status: number;
+    source_url: string;
+    pdf_url: string;
+    section_count: number;
+  }>
+> {
+  initDb();
+
+  if (!shouldUseSupabase()) {
+    const db = sqlite.getDb();
+    const rows = db
+      .prepare(
+        `
+      SELECT
+        g.id,
+        g.name,
+        g.publish_date,
+        g.status,
+        g.source_url,
+        g.pdf_url,
+        COUNT(gs.section_id) AS section_count
+      FROM guidelines g
+      LEFT JOIN guideline_sections gs ON gs.guideline_id = g.id
+      GROUP BY g.id
+      ORDER BY g.publish_date DESC
+      LIMIT ?
+    `,
+      )
+      .all(limit) as Array<Record<string, unknown>>;
+
+    return rows.map((row) => ({
+      id: String(row.id),
+      name: String(row.name),
+      publish_date: row.publish_date ? String(row.publish_date) : null,
+      status: Number(row.status),
+      source_url: String(row.source_url),
+      pdf_url: String(row.pdf_url),
+      section_count: Number(row.section_count ?? 0),
+    }));
+  }
+
+  const supabase = getSupabaseClient();
+  const { data: guidelines, error: guidelineError } = await supabase
+    .from("guidelines")
+    .select("id, name, publish_date, status, source_url, pdf_url")
+    .order("publish_date", { ascending: false, nullsFirst: false })
+    .limit(limit);
+
+  if (guidelineError) {
+    throw new Error(`Supabase listGuidelineSourcesWithSectionCounts(guidelines) failed: ${guidelineError.message}`);
+  }
+
+  const ids = (guidelines ?? []).map((row) => String(row.id));
+  const sectionCounts = new Map<string, number>();
+
+  if (ids.length) {
+    const { data: sections, error: sectionError } = await supabase
+      .from("guideline_sections")
+      .select("guideline_id")
+      .in("guideline_id", ids);
+
+    if (sectionError) {
+      throw new Error(`Supabase listGuidelineSourcesWithSectionCounts(sections) failed: ${sectionError.message}`);
+    }
+
+    for (const row of sections ?? []) {
+      const id = String(row.guideline_id);
+      sectionCounts.set(id, (sectionCounts.get(id) ?? 0) + 1);
+    }
+  }
+
+  return (guidelines ?? []).map((row) => ({
+    id: String(row.id),
+    name: String(row.name),
+    publish_date: row.publish_date ? String(row.publish_date) : null,
+    status: Number(row.status ?? 0),
+    source_url: String(row.source_url ?? ""),
+    pdf_url: String(row.pdf_url ?? ""),
+    section_count: sectionCounts.get(String(row.id)) ?? 0,
+  }));
+}
+
+export async function searchRecommendationChunksFts(params: {
+  query: string;
+  guideline_ids?: string[];
+  section_ids?: string[];
+  as_of_date?: string;
+  limit?: number;
+}): Promise<Array<Record<string, unknown>>> {
+  initDb();
+
+  if (!shouldUseSupabase()) {
+    const db = sqlite.getDb();
+    const guidelineIds = params.guideline_ids ?? [];
+    const sectionIds = params.section_ids ?? [];
+    const filters: string[] = [];
+    const ftsQuery = ftsQueryFromText(params.query);
+    if (!ftsQuery) {
+      return [];
+    }
+
+    const values: unknown[] = [ftsQuery];
+
+    if (guidelineIds.length) {
+      filters.push(`rc.guideline_id IN (${guidelineIds.map(() => "?").join(",")})`);
+      values.push(...guidelineIds);
+    }
+
+    if (sectionIds.length) {
+      filters.push(`rc.section_id IN (${sectionIds.map(() => "?").join(",")})`);
+      values.push(...sectionIds);
+    }
+
+    const asOfDate = normalizeDateOnly(params.as_of_date);
+    if (asOfDate) {
+      filters.push("(g.publish_date IS NULL OR date(substr(g.publish_date, 1, 10)) <= date(?))");
+      values.push(asOfDate);
+    }
+
+    const whereFilters = filters.length ? `AND ${filters.join(" AND ")}` : "";
+    const sql = `
+      SELECT
+        rc.chunk_id,
+        rc.guideline_id,
+        g.name AS guideline_name,
+        rc.section_id,
+        gs.section_title,
+        rc.chunk_text,
+        rc.tags,
+        rc.evidence_level,
+        rc.source_anchor,
+        g.source_url AS document_url,
+        g.publish_date AS document_version,
+        'minzdrav' AS source,
+        'local' AS access_mode,
+        bm25(recommendation_chunks_fts) AS score
+      FROM recommendation_chunks_fts
+      JOIN recommendation_chunks rc ON rc.chunk_id = recommendation_chunks_fts.chunk_id
+      JOIN guidelines g ON g.id = rc.guideline_id
+      LEFT JOIN guideline_sections gs
+        ON gs.guideline_id = rc.guideline_id
+        AND gs.section_id = rc.section_id
+      WHERE recommendation_chunks_fts MATCH ?
+      ${whereFilters}
+      ORDER BY score ASC
+      LIMIT ${Math.max(1, Math.min(50, params.limit ?? 12))}
+    `;
+
+    return db.prepare(sql).all(...values) as Array<Record<string, unknown>>;
+  }
+
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase.rpc("onco_search_recommendation_chunks", {
+    query_text: params.query,
+    guideline_ids: params.guideline_ids?.length ? params.guideline_ids : null,
+    section_ids: params.section_ids?.length ? params.section_ids : null,
+    as_of_date: normalizeDateOnly(params.as_of_date),
+    result_limit: Math.max(1, Math.min(50, params.limit ?? 12)),
+  });
+
+  if (error) {
+    throw new Error(`Supabase searchRecommendationChunksFts failed: ${error.message}`);
+  }
+
+  return (data ?? []) as Array<Record<string, unknown>>;
+}
+
+export async function searchRecommendationChunksLike(params: {
+  query: string;
+  guideline_ids?: string[];
+  as_of_date?: string;
+  limit?: number;
+}): Promise<Array<Record<string, unknown>>> {
+  initDb();
+
+  if (!shouldUseSupabase()) {
+    const db = sqlite.getDb();
+    const normalized = params.query.trim().toLowerCase();
+    if (!normalized) {
+      return [];
+    }
+
+    const guidelineIds = params.guideline_ids ?? [];
+    const filters: string[] = ["lower(rc.chunk_text) LIKE ?"];
+    const values: unknown[] = [`%${normalized}%`];
+
+    if (guidelineIds.length) {
+      filters.push(`rc.guideline_id IN (${guidelineIds.map(() => "?").join(",")})`);
+      values.push(...guidelineIds);
+    }
+
+    const asOfDate = normalizeDateOnly(params.as_of_date);
+    if (asOfDate) {
+      filters.push("(g.publish_date IS NULL OR date(substr(g.publish_date, 1, 10)) <= date(?))");
+      values.push(asOfDate);
+    }
+
+    values.push(Math.max(1, Math.min(50, params.limit ?? 8)));
+
+    const rows = db
+      .prepare(
+        `
+      SELECT
+        rc.chunk_id,
+        rc.guideline_id,
+        g.name AS guideline_name,
+        rc.section_id,
+        gs.section_title,
+        rc.chunk_text,
+        rc.tags,
+        rc.evidence_level,
+        rc.source_anchor,
+        g.source_url AS document_url,
+        g.publish_date AS document_version,
+        'minzdrav' AS source,
+        'local' AS access_mode,
+        CASE
+          WHEN lower(rc.chunk_text) LIKE '%рекомендуется%' THEN 0.5
+          ELSE 1.0
+        END AS score
+      FROM recommendation_chunks rc
+      JOIN guidelines g ON g.id = rc.guideline_id
+      LEFT JOIN guideline_sections gs
+        ON gs.guideline_id = rc.guideline_id
+        AND gs.section_id = rc.section_id
+      WHERE ${filters.join(" AND ")}
+      ORDER BY score ASC, rc.created_at DESC
+      LIMIT ?
+    `,
+      )
+      .all(...values) as Array<Record<string, unknown>>;
+
+    return rows;
+  }
+
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase.rpc("onco_search_recommendation_chunks_like", {
+    query_text: params.query,
+    guideline_ids: params.guideline_ids?.length ? params.guideline_ids : null,
+    as_of_date: normalizeDateOnly(params.as_of_date),
+    result_limit: Math.max(1, Math.min(50, params.limit ?? 8)),
+  });
+
+  if (error) {
+    throw new Error(`Supabase searchRecommendationChunksLike failed: ${error.message}`);
+  }
+
+  return (data ?? []) as Array<Record<string, unknown>>;
+}
+
+export async function searchSourceDocumentsFts(params: {
+  query: string;
+  sources: SourceId[];
+  limit?: number;
+}): Promise<Array<Record<string, unknown>>> {
+  initDb();
+
+  if (!shouldUseSupabase()) {
+    const db = sqlite.getDb();
+    const sources = params.sources.filter((source) => source !== "minzdrav");
+    if (!sources.length) {
+      return [];
+    }
+
+    const ftsQuery = ftsQueryFromText(params.query);
+    if (!ftsQuery) {
+      return [];
+    }
+
+    const limit = Math.max(1, Math.min(30, params.limit ?? 10));
+    const sourceFilter = sources.map(() => "?").join(",");
+    const values: unknown[] = [ftsQuery, ...sources];
+    const likeNeedle = params.query.trim().toLowerCase();
+
+    try {
+      const rows = db
+        .prepare(
+          `
+        SELECT
+          sd.document_id AS chunk_id,
+          sd.document_id AS guideline_id,
+          sd.title AS guideline_name,
+          'source_doc' AS section_id,
+          sd.source AS section_title,
+          sd.content_text AS chunk_text,
+          '[]' AS tags,
+          NULL AS evidence_level,
+          sd.title AS source_anchor,
+          sd.url AS document_url,
+          COALESCE(sd.published_at, sd.version) AS document_version,
+          sd.source AS source,
+          'local' AS access_mode,
+          bm25(source_documents_fts) AS score
+        FROM source_documents_fts
+        JOIN source_documents sd ON sd.document_id = source_documents_fts.document_id
+        WHERE source_documents_fts MATCH ?
+          AND sd.source IN (${sourceFilter})
+          AND sd.ingest_status = 'downloaded'
+        ORDER BY score ASC
+        LIMIT ${limit}
+      `,
+        )
+        .all(...values) as Array<Record<string, unknown>>;
+
+      return rows;
+    } catch (error) {
+      const message = String(error);
+      if (!message.toLowerCase().includes("fts5")) {
+        throw error;
+      }
+      if (!likeNeedle) {
+        return [];
+      }
+
+      const likeRows = db
+        .prepare(
+          `
+        SELECT
+          sd.document_id AS chunk_id,
+          sd.document_id AS guideline_id,
+          sd.title AS guideline_name,
+          'source_doc' AS section_id,
+          sd.source AS section_title,
+          sd.content_text AS chunk_text,
+          '[]' AS tags,
+          NULL AS evidence_level,
+          sd.title AS source_anchor,
+          sd.url AS document_url,
+          COALESCE(sd.published_at, sd.version) AS document_version,
+          sd.source AS source,
+          'local' AS access_mode,
+          100.0 AS score
+        FROM source_documents sd
+        WHERE sd.source IN (${sourceFilter})
+          AND sd.ingest_status = 'downloaded'
+          AND lower(sd.title || ' ' || sd.content_text) LIKE ?
+        ORDER BY sd.updated_at DESC
+        LIMIT ${limit}
+      `,
+        )
+        .all(...sources, `%${likeNeedle}%`) as Array<Record<string, unknown>>;
+
+      return likeRows;
+    }
+  }
+
+  const supabase = getSupabaseClient();
+  const filteredSources = params.sources.filter((source) => source !== "minzdrav");
+
+  if (!filteredSources.length) {
+    return [];
+  }
+
+  const { data, error } = await supabase.rpc("onco_search_source_documents", {
+    query_text: params.query,
+    source_ids: filteredSources,
+    result_limit: Math.max(1, Math.min(30, params.limit ?? 10)),
+  });
+
+  if (error) {
+    throw new Error(`Supabase searchSourceDocumentsFts failed: ${error.message}`);
+  }
+
+  return (data ?? []) as Array<Record<string, unknown>>;
 }

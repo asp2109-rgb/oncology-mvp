@@ -5,7 +5,7 @@ export const runtime = "nodejs";
 
 export async function GET() {
   try {
-    const sources = getSourceStatus();
+    const sources = await getSourceStatus();
     return NextResponse.json({
       generated_at: new Date().toISOString(),
       total_sources: sources.length,

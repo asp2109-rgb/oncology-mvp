@@ -36,7 +36,7 @@ Next.js fullstack MVP для ретроспективной проверки п�
 ## Стек
 
 - Next.js 16, TypeScript
-- SQLite + FTS5 (`better-sqlite3`)
+- Supabase (Postgres + FTS + RPC), schema: `supabase/onco_schema.sql`
 - Rule engine + OpenAI LLM слой для doctor-mode и patient-mode
   - doctor-mode: `rules + RAG + KAG + LLM`
 - Парсинг входных документов: `pdf-parse`, `mammoth`, `word-extractor`
@@ -54,14 +54,27 @@ npm run dev
 
 ## Переменные окружения
 
-Опционально:
+Обязательно для Supabase режима:
 
 ```bash
+ONCO_DB_PROVIDER=supabase
+ONCO_DB_STRICT_SUPABASE=false
+SUPABASE_URL=https://<your-project-ref>.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=<service-role-key>
+# или publishable/anon ключ (если вы разрешили доступ политиками)
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=<publishable-key>
+SUPABASE_BATCH_SIZE=500
+
 OPENAI_API_KEY=...
 OPENAI_MODEL=gpt-4o-mini
-ONCO_DB_PATH=/absolute/path/to/oncology.db
 PUBLIC_DEMO_URL=https://your-demo-url
 PUBLIC_DOCS_URL=https://your-docs-url
+```
+
+Перед первым запуском примените SQL схему в Supabase SQL Editor:
+
+```sql
+-- файл: supabase/onco_schema.sql
 ```
 
 `OPENAI_API_KEY` обязателен для `/api/patient/explain` и `/api/doctor/validate`.
@@ -72,10 +85,10 @@ PUBLIC_DOCS_URL=https://your-docs-url
 - `npm run build` — build
 - `npm run lint` — lint
 - `npm run test` — unit-тесты
-- `npm run db:init` — инициализация схемы БД
+- `npm run db:init` — проверка подключения и инициализация провайдера БД
+- `npm run db:supabase:check` — диагностика Supabase-подключения и скорости ключевых запросов
 - `npm run ingest:minzdrav` — загрузка онко-КР (`C00-D48`, статусы 0 + 4)
 - `npm run sources:sync` — синхронизация внешних источников (скачать все доступное + online_only fallback)
-- `npm run db:prepare-deploy` — подготовка облегченной базы `data/oncology.deploy.db` для деплоя
 - `npm run benchmark:sample` — запуск бенчмарка на встроенных наборах
 - `npm run qr:generate` — генерация `public/qr/qr-demo.png` и `public/qr/qr-docs.png`
 
@@ -93,29 +106,16 @@ PUBLIC_DOCS_URL=https://your-docs-url
 
 ## Деплой на Render (free)
 
-1. Подготовьте deploy-базу:
-```bash
-npm run db:prepare-deploy
-```
-По умолчанию скрипт пытается сохранить до 40 последних КР, но автоматически ужимает базу до безопасного размера (по умолчанию до 95 MB), чтобы файл можно было загрузить в репозиторий и развернуть на Render.
-
-Полезные параметры:
-```bash
-# Запросить больше КР (скрипт сам ужмет по лимиту размера)
-ONCO_KEEP_GUIDELINES=60 npm run db:prepare-deploy
-
-# Явно задать лимит итогового файла deploy-БД
-ONCO_DEPLOY_MAX_MB=95 npm run db:prepare-deploy
-
-# Нижняя граница, ниже которой авто-ужатие не пойдет
-ONCO_MIN_KEEP_GUIDELINES=14 npm run db:prepare-deploy
-```
-2. Убедитесь, что в репозитории есть:
-- `render.yaml`
-- `data/oncology.deploy.db`
-3. На Render создайте сервис через Blueprint из репозитория (файл `render.yaml` применится автоматически).
-4. При необходимости добавьте в Environment:
-- `OPENAI_API_KEY` (обязателен для patient-mode)
+1. Убедитесь, что в Supabase применена схема `supabase/onco_schema.sql`.
+2. На Render создайте сервис через Blueprint из репозитория (файл `render.yaml`).
+3. В Environment добавьте:
+- `ONCO_DB_PROVIDER=supabase`
+- `ONCO_DB_STRICT_SUPABASE=true`
+- `SUPABASE_URL`
+- `SUPABASE_SERVICE_ROLE_KEY` (рекомендуется)
+- `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` (опционально, для client-side вызовов)
+- `SUPABASE_BATCH_SIZE=500`
+- `OPENAI_API_KEY`
 - `OPENAI_MODEL` (по умолчанию `gpt-4o-mini`)
 
 ## Артефакты

@@ -26,8 +26,8 @@ async function seedBaselineGuideline() {
 
   initDb();
 
-  withTransaction(() => {
-    upsertGuideline({
+  await withTransaction(async () => {
+    await upsertGuideline({
       id: "574_1",
       code: 574,
       version: 1,
@@ -40,7 +40,7 @@ async function seedBaselineGuideline() {
       is_oncology: 1,
     });
 
-    replaceGuidelineSections("574_1", [
+    await replaceGuidelineSections("574_1", [
       {
         guideline_id: "574_1",
         section_id: "doc_3",
@@ -50,7 +50,7 @@ async function seedBaselineGuideline() {
       },
     ]);
 
-    replaceRecommendationChunks("574_1", [
+    await replaceRecommendationChunks("574_1", [
       {
         chunk_id: "574_1:doc_3:1",
         guideline_id: "574_1",
@@ -75,8 +75,8 @@ async function seedGuidelinesWithModernVersion() {
 
   initDb();
 
-  withTransaction(() => {
-    upsertGuideline({
+  await withTransaction(async () => {
+    await upsertGuideline({
       id: "574_1",
       code: 574,
       version: 1,
@@ -89,7 +89,7 @@ async function seedGuidelinesWithModernVersion() {
       is_oncology: 1,
     });
 
-    upsertGuideline({
+    await upsertGuideline({
       id: "574_2",
       code: 574,
       version: 2,
@@ -102,7 +102,7 @@ async function seedGuidelinesWithModernVersion() {
       is_oncology: 1,
     });
 
-    replaceGuidelineSections("574_1", [
+    await replaceGuidelineSections("574_1", [
       {
         guideline_id: "574_1",
         section_id: "doc_3",
@@ -112,7 +112,7 @@ async function seedGuidelinesWithModernVersion() {
       },
     ]);
 
-    replaceGuidelineSections("574_2", [
+    await replaceGuidelineSections("574_2", [
       {
         guideline_id: "574_2",
         section_id: "doc_3",
@@ -122,7 +122,7 @@ async function seedGuidelinesWithModernVersion() {
       },
     ]);
 
-    replaceRecommendationChunks("574_1", [
+    await replaceRecommendationChunks("574_1", [
       {
         chunk_id: "574_1:doc_3:1",
         guideline_id: "574_1",
@@ -134,7 +134,7 @@ async function seedGuidelinesWithModernVersion() {
       },
     ]);
 
-    replaceRecommendationChunks("574_2", [
+    await replaceRecommendationChunks("574_2", [
       {
         chunk_id: "574_2:doc_3:1",
         guideline_id: "574_2",
@@ -159,8 +159,8 @@ async function seedCrossNosologyGuidelines() {
 
   initDb();
 
-  withTransaction(() => {
-    upsertGuideline({
+  await withTransaction(async () => {
+    await upsertGuideline({
       id: "379_4",
       code: 379,
       version: 4,
@@ -173,7 +173,7 @@ async function seedCrossNosologyGuidelines() {
       is_oncology: 1,
     });
 
-    upsertGuideline({
+    await upsertGuideline({
       id: "355_5",
       code: 355,
       version: 5,
@@ -186,7 +186,7 @@ async function seedCrossNosologyGuidelines() {
       is_oncology: 1,
     });
 
-    replaceGuidelineSections("379_4", [
+    await replaceGuidelineSections("379_4", [
       {
         guideline_id: "379_4",
         section_id: "doc_3",
@@ -195,7 +195,7 @@ async function seedCrossNosologyGuidelines() {
         section_text: "Для рака молочной железы возможна ПХТ паклитаксел + карбоплатин.",
       },
     ]);
-    replaceGuidelineSections("355_5", [
+    await replaceGuidelineSections("355_5", [
       {
         guideline_id: "355_5",
         section_id: "doc_3",
@@ -205,7 +205,7 @@ async function seedCrossNosologyGuidelines() {
       },
     ]);
 
-    replaceRecommendationChunks("379_4", [
+    await replaceRecommendationChunks("379_4", [
       {
         chunk_id: "379_4:doc_3:1",
         guideline_id: "379_4",
@@ -216,7 +216,7 @@ async function seedCrossNosologyGuidelines() {
         source_anchor: "Лечение",
       },
     ]);
-    replaceRecommendationChunks("355_5", [
+    await replaceRecommendationChunks("355_5", [
       {
         chunk_id: "355_5:doc_3:1",
         guideline_id: "355_5",

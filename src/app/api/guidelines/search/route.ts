@@ -25,7 +25,7 @@ export async function POST(request: Request) {
       query: parsed.query,
     });
 
-    const localHits = searchWithProviders([sqlProvider, ruleProvider, sourceDocumentProvider], parsed.query, {
+    const localHits = await searchWithProviders([sqlProvider, ruleProvider, sourceDocumentProvider], parsed.query, {
       guideline_ids: parsed.guideline_ids,
       sources: parsed.sources,
       as_of_date: referenceDate ?? undefined,

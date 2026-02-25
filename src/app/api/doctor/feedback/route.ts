@@ -9,7 +9,7 @@ export async function POST(request: Request) {
   try {
     const payload = await request.json();
     const parsed = doctorFeedbackRequestSchema.parse(payload);
-    const saved = saveDoctorFeedback({
+    const saved = await saveDoctorFeedback({
       validation_run_id: parsed.validation_run_id,
       rating: parsed.rating,
       comment: parsed.comment.trim(),

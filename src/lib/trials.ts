@@ -72,7 +72,7 @@ export async function searchTrials(
   const normalizedQuery = query.trim();
   const queryKey = `${normalizedQuery}|${recruiting ? "1" : "0"}|${pageSize}`;
 
-  const cached = readTrialsCache(queryKey);
+  const cached = await readTrialsCache(queryKey);
   if (cached && shouldUseCache(cached.fetched_at)) {
     const payload = safeJsonParse<{ fetched_at: string; items: TrialItem[] } | null>(
       cached.payload_json,
@@ -116,7 +116,7 @@ export async function searchTrials(
 
   const fetchedAt = new Date().toISOString();
 
-  upsertTrialsCache(queryKey, {
+  await upsertTrialsCache(queryKey, {
     fetched_at: fetchedAt,
     items,
   });

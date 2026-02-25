@@ -10,10 +10,10 @@ const externalLinks = [
   { label: "NCCN для пациентов", href: "https://www.nccn.org/patients" },
 ];
 
-export default function SourcesPage() {
-  const counts = getGuidelineCounts();
-  const sources = listGuidelineSources(300);
-  const status = getSourceStatus();
+export default async function SourcesPage() {
+  const counts = await getGuidelineCounts();
+  const sources = await listGuidelineSources(300);
+  const status = await getSourceStatus();
 
   return (
     <div className="grid gap-6">

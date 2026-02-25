@@ -126,7 +126,7 @@ describe("api routes", () => {
     const { saveValidationRun } = await import("@/lib/db");
     const validationResult = { ...mockValidation() } as { llm_review?: unknown } & Record<string, unknown>;
     delete validationResult.llm_review;
-    const runId = saveValidationRun({
+    const runId = await saveValidationRun({
       case_id: null,
       as_of_date: "2026-02-25",
       latency_ms: 1,

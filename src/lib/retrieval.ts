@@ -167,15 +167,17 @@ export async function retrieveEvidence(options: RetrievalOptions): Promise<{
   const resolvedPolicy = resolveSourcePolicy(options.sourceSelection, options.sourcePolicy);
   const enabledSources = options.sourceSelection.filter((source) => resolvedPolicy[source] !== "DISABLED");
 
-  const localLists = variants.map((variant) =>
-    searchWithProviders([sqlProvider, ruleProvider, sourceDocumentProvider], variant, {
+  const localLists: SearchHit[][] = [];
+  for (const variant of variants) {
+    const hits = await searchWithProviders([sqlProvider, ruleProvider, sourceDocumentProvider], variant, {
       guideline_ids: options.guidelineIds,
       section_ids: options.sectionIds,
       sources: enabledSources,
       as_of_date: referenceDate ?? undefined,
       limit: Math.max(6, Math.min(25, limit)),
-    }),
-  );
+    });
+    localLists.push(hits);
+  }
 
   let merged = mode === "fusion" ? reciprocalRankFusion(localLists) : uniqBySourceChunk(localLists.flat());
   merged = rankHitsForReferenceDate(merged, referenceDate);

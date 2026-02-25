@@ -15,21 +15,15 @@ export async function POST(request: Request) {
       ? parsedRequest.data.case_input
       : caseInputSchema.parse(payload);
 
-    const validationOptions: ValidationOptions = parsedRequest.success
-      ? {
-          source_selection: parsedRequest.data.source_selection,
-          source_policy: parsedRequest.data.source_policy,
-          retrieval_mode: parsedRequest.data.retrieval_mode,
-          online_fallback: parsedRequest.data.online_fallback,
-        }
-      : {
-          source_selection: ["minzdrav"],
-          source_policy: {
-            minzdrav: "LOCAL_ONLY",
-          },
-          retrieval_mode: "standard",
-          online_fallback: false,
-        };
+    const validationOptions: ValidationOptions = {
+      // Single-source mode: always validate against local Minzdrav KR.
+      source_selection: ["minzdrav"],
+      source_policy: {
+        minzdrav: "LOCAL_ONLY",
+      },
+      retrieval_mode: parsedRequest.success ? parsedRequest.data.retrieval_mode : "standard",
+      online_fallback: false,
+    };
 
     const result = await validateCase(caseInput, validationOptions);
 

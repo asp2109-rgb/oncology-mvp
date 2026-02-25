@@ -1,11 +1,11 @@
 import { createHash } from "node:crypto";
 import {
-  getDb,
   initDb,
   logSourceSyncAttempt,
   upsertSourceDocument,
   deleteSourceDocumentsBySource,
   listSourceStatus,
+  listRecentMinzdravGuidelines,
 } from "@/lib/db";
 import { SOURCE_CONFIG, SOURCE_IDS } from "@/lib/sources";
 import type { SourceId } from "@/lib/types";
@@ -81,41 +81,13 @@ async function extractPdfText(url: string): Promise<{ ok: boolean; status: numbe
 }
 
 async function syncMinzdrav(): Promise<SyncItemResult> {
-  const database = getDb();
+  const rows = await listRecentMinzdravGuidelines(600);
 
-  const rows = database
-    .prepare(
-      `
-      SELECT
-        g.id,
-        g.name,
-        g.publish_date,
-        g.source_url,
-        (
-          SELECT rc.chunk_text
-          FROM recommendation_chunks rc
-          WHERE rc.guideline_id = g.id
-          ORDER BY rc.chunk_id ASC
-          LIMIT 1
-        ) AS sample_chunk
-      FROM guidelines g
-      ORDER BY g.publish_date DESC
-      LIMIT 600
-    `,
-    )
-    .all() as Array<{
-    id: string;
-    name: string;
-    publish_date: string | null;
-    source_url: string;
-    sample_chunk: string | null;
-  }>;
-
-  deleteSourceDocumentsBySource("minzdrav");
+  await deleteSourceDocumentsBySource("minzdrav");
   let downloaded = 0;
 
   for (const row of rows) {
-    upsertSourceDocument(
+    await upsertSourceDocument(
       {
         document_id: `minzdrav:${row.id}`,
         source: "minzdrav",
@@ -134,7 +106,7 @@ async function syncMinzdrav(): Promise<SyncItemResult> {
     );
 
     downloaded += 1;
-    logSourceSyncAttempt({
+    await logSourceSyncAttempt({
       source: "minzdrav",
       url: row.source_url,
       status: "downloaded",
@@ -156,7 +128,7 @@ async function syncRUSSCO(): Promise<SyncItemResult> {
   const page = await fetchText(root);
 
   if (!page.ok) {
-    logSourceSyncAttempt({
+    await logSourceSyncAttempt({
       source: "russco",
       url: root,
       status: "failed",
@@ -167,7 +139,7 @@ async function syncRUSSCO(): Promise<SyncItemResult> {
     return { source: "russco", attempted: 1, downloaded: 0, online_only: 0, failed: 1 };
   }
 
-  deleteSourceDocumentsBySource("russco");
+  await deleteSourceDocumentsBySource("russco");
 
   const links = Array.from(
     new Set(
@@ -189,7 +161,7 @@ async function syncRUSSCO(): Promise<SyncItemResult> {
     if (downloadNow) {
       const pdf = await extractPdfText(link);
       if (pdf.ok) {
-        upsertSourceDocument(
+        await upsertSourceDocument(
           {
             document_id: stableId("russco", link),
             source: "russco",
@@ -207,10 +179,10 @@ async function syncRUSSCO(): Promise<SyncItemResult> {
           [title],
         );
         downloaded += 1;
-        logSourceSyncAttempt({ source: "russco", url: link, status: "downloaded", http_status: pdf.status });
+        await logSourceSyncAttempt({ source: "russco", url: link, status: "downloaded", http_status: pdf.status });
       } else {
         failed += 1;
-        logSourceSyncAttempt({
+        await logSourceSyncAttempt({
           source: "russco",
           url: link,
           status: "failed",
@@ -219,7 +191,7 @@ async function syncRUSSCO(): Promise<SyncItemResult> {
         });
       }
     } else {
-      upsertSourceDocument(
+      await upsertSourceDocument(
         {
           document_id: stableId("russco", link),
           source: "russco",
@@ -237,7 +209,7 @@ async function syncRUSSCO(): Promise<SyncItemResult> {
         [title],
       );
       onlineOnly += 1;
-      logSourceSyncAttempt({ source: "russco", url: link, status: "online_only", http_status: 200 });
+      await logSourceSyncAttempt({ source: "russco", url: link, status: "online_only", http_status: 200 });
     }
   }
 
@@ -259,7 +231,6 @@ async function syncNccnPatients(): Promise<SyncItemResult> {
   let mergedText = "";
   let statusCode = 0;
   for (const pageUrl of pages) {
-    // eslint-disable-next-line no-await-in-loop
     const page = await fetchText(pageUrl);
     if (page.ok) {
       mergedText += `\n${page.text}`;
@@ -268,7 +239,7 @@ async function syncNccnPatients(): Promise<SyncItemResult> {
   }
 
   if (!mergedText.trim()) {
-    logSourceSyncAttempt({
+    await logSourceSyncAttempt({
       source: "nccn_patient",
       url: pages[0],
       status: "failed",
@@ -278,7 +249,7 @@ async function syncNccnPatients(): Promise<SyncItemResult> {
     return { source: "nccn_patient", attempted: 1, downloaded: 0, online_only: 0, failed: 1 };
   }
 
-  deleteSourceDocumentsBySource("nccn_patient");
+  await deleteSourceDocumentsBySource("nccn_patient");
 
   let links = Array.from(
     new Set(
@@ -300,7 +271,6 @@ async function syncNccnPatients(): Promise<SyncItemResult> {
     ).slice(0, 30);
 
     for (const detailUrl of detailLinks) {
-      // eslint-disable-next-line no-await-in-loop
       const detailPage = await fetchText(detailUrl);
       if (!detailPage.ok) {
         continue;
@@ -331,7 +301,7 @@ async function syncNccnPatients(): Promise<SyncItemResult> {
     if (index < 8) {
       const pdf = await extractPdfText(link);
       if (pdf.ok) {
-        upsertSourceDocument(
+        await upsertSourceDocument(
           {
             document_id: stableId("nccn_patient", link),
             source: "nccn_patient",
@@ -349,7 +319,7 @@ async function syncNccnPatients(): Promise<SyncItemResult> {
           [title],
         );
         downloaded += 1;
-        logSourceSyncAttempt({
+        await logSourceSyncAttempt({
           source: "nccn_patient",
           url: link,
           status: "downloaded",
@@ -357,7 +327,7 @@ async function syncNccnPatients(): Promise<SyncItemResult> {
         });
       } else {
         failed += 1;
-        logSourceSyncAttempt({
+        await logSourceSyncAttempt({
           source: "nccn_patient",
           url: link,
           status: "failed",
@@ -366,7 +336,7 @@ async function syncNccnPatients(): Promise<SyncItemResult> {
         });
       }
     } else {
-      upsertSourceDocument(
+      await upsertSourceDocument(
         {
           document_id: stableId("nccn_patient", link),
             source: "nccn_patient",
@@ -384,7 +354,7 @@ async function syncNccnPatients(): Promise<SyncItemResult> {
           [title],
         );
       onlineOnly += 1;
-      logSourceSyncAttempt({
+      await logSourceSyncAttempt({
         source: "nccn_patient",
         url: link,
         status: "online_only",
@@ -415,9 +385,9 @@ async function syncNccnProfessional(): Promise<SyncItemResult> {
   const location = response?.headers.get("location") ?? "";
   const loginRequired = status === 302 || /\/login/i.test(location);
 
-  deleteSourceDocumentsBySource("nccn_professional");
+  await deleteSourceDocumentsBySource("nccn_professional");
 
-  upsertSourceDocument(
+  await upsertSourceDocument(
     {
       document_id: stableId("nccn_professional", url),
       source: "nccn_professional",
@@ -435,7 +405,7 @@ async function syncNccnProfessional(): Promise<SyncItemResult> {
     ["nccn", "professional", "guidelines"],
   );
 
-  logSourceSyncAttempt({
+  await logSourceSyncAttempt({
     source: "nccn_professional",
     url,
     status: "online_only",
@@ -457,13 +427,13 @@ async function syncSimpleHtmlSource(
   url: string,
   title: string,
 ): Promise<SyncItemResult> {
-  deleteSourceDocumentsBySource(source);
+  await deleteSourceDocumentsBySource(source);
   const page = await fetchText(url);
 
   if (!page.ok) {
     const accessRestricted = page.status === 401 || page.status === 403;
     const status = accessRestricted ? "online_only" : "failed";
-    upsertSourceDocument(
+    await upsertSourceDocument(
       {
         document_id: stableId(source, url),
         source,
@@ -480,7 +450,7 @@ async function syncSimpleHtmlSource(
       },
       [title],
     );
-    logSourceSyncAttempt({
+    await logSourceSyncAttempt({
       source,
       url,
       status,
@@ -500,7 +470,7 @@ async function syncSimpleHtmlSource(
   const downloadable = plain.length > 1000;
   const status = downloadable ? "downloaded" : "online_only";
 
-  upsertSourceDocument(
+  await upsertSourceDocument(
     {
       document_id: stableId(source, url),
       source,
@@ -518,7 +488,7 @@ async function syncSimpleHtmlSource(
     [title],
   );
 
-  logSourceSyncAttempt({
+  await logSourceSyncAttempt({
     source,
     url,
     status,
@@ -544,7 +514,7 @@ async function syncPubMed(): Promise<SyncItemResult> {
 
   const searchRes = await fetch(searchUrl.toString(), { cache: "no-store" }).catch(() => null);
   if (!searchRes || !searchRes.ok) {
-    logSourceSyncAttempt({
+    await logSourceSyncAttempt({
       source: "pubmed",
       url: searchUrl.toString(),
       status: "failed",
@@ -570,7 +540,7 @@ async function syncPubMed(): Promise<SyncItemResult> {
 
   const summaryRes = await fetch(summaryUrl.toString(), { cache: "no-store" }).catch(() => null);
   if (!summaryRes || !summaryRes.ok) {
-    logSourceSyncAttempt({
+    await logSourceSyncAttempt({
       source: "pubmed",
       url: summaryUrl.toString(),
       status: "failed",
@@ -584,7 +554,7 @@ async function syncPubMed(): Promise<SyncItemResult> {
     result?: Record<string, { uid?: string; title?: string; pubdate?: string }>;
   };
 
-  deleteSourceDocumentsBySource("pubmed");
+  await deleteSourceDocumentsBySource("pubmed");
 
   let downloaded = 0;
   for (const id of ids) {
@@ -596,7 +566,7 @@ async function syncPubMed(): Promise<SyncItemResult> {
     const pubdate = item.pubdate?.trim() || null;
     const articleUrl = `https://pubmed.ncbi.nlm.nih.gov/${id}/`;
 
-    upsertSourceDocument(
+    await upsertSourceDocument(
       {
         document_id: stableId("pubmed", articleUrl),
         source: "pubmed",
@@ -614,7 +584,7 @@ async function syncPubMed(): Promise<SyncItemResult> {
       [title, "pubmed", id],
     );
     downloaded += 1;
-    logSourceSyncAttempt({ source: "pubmed", url: articleUrl, status: "downloaded", http_status: 200 });
+    await logSourceSyncAttempt({ source: "pubmed", url: articleUrl, status: "downloaded", http_status: 200 });
   }
 
   return {
@@ -662,7 +632,6 @@ export async function syncSources(params: { sources?: SourceId[] } = {}): Promis
 
   const results: SyncItemResult[] = [];
   for (const source of selected) {
-    // eslint-disable-next-line no-await-in-loop
     const result = await runConnector(source);
     results.push(result);
   }
@@ -674,9 +643,9 @@ export async function syncSources(params: { sources?: SourceId[] } = {}): Promis
   };
 }
 
-export function getSourceStatus() {
+export async function getSourceStatus() {
   initDb();
-  const raw = listSourceStatus();
+  const raw = await listSourceStatus();
   const bySource = new Map(raw.map((item) => [item.source, item]));
 
   return SOURCE_IDS.map((source) => {

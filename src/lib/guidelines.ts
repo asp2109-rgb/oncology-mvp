@@ -1,4 +1,4 @@
-import { getDb, initDb } from "@/lib/db";
+import { listGuidelineSourcesWithSectionCounts, listGuidelinesRaw } from "@/lib/db";
 import type { AppliedGuidelineVersion } from "@/lib/types";
 import { tokenize } from "@/lib/utils";
 
@@ -199,53 +199,24 @@ function buildQueryTokens(diagnosis: string, context: GuidelineSelectionContext)
   return unique([...siteHints, ...nosologyTokens, ...diagnosisTokens]).slice(0, 10);
 }
 
-export function selectApplicableGuidelines(
+export async function selectApplicableGuidelines(
   diagnosis: string,
   asOfDate: string,
   limit = 8,
   context: GuidelineSelectionContext = {},
-): AppliedGuidelineVersion[] {
-  initDb();
-  const database = getDb();
-
+): Promise<AppliedGuidelineVersion[]> {
   const queryTokens = buildQueryTokens(diagnosis, context);
   const fallbackDiagnosis = diagnosisFocusText(diagnosis).toLowerCase();
-
-  const filters = queryTokens.length
-    ? queryTokens.map(() => "lower(name) LIKE ?").join(" OR ")
-    : "lower(name) LIKE ?";
-
-  const params = queryTokens.length
-    ? queryTokens.map((token) => `%${token}%`)
-    : [`%${fallbackDiagnosis}%`];
-
-  const rawCandidates = database
-    .prepare(
-      `
-      SELECT
-        id,
-        code,
-        version,
-        name,
-        publish_date,
-        status,
-        source_url,
-        pdf_url
-      FROM guidelines
-      WHERE (${filters})
-      ORDER BY publish_date DESC
-    `,
-    )
-    .all(...params) as Array<{
-    id: string;
-    code: number | null;
-    version: number | null;
-    name: string;
-    publish_date: string | null;
-    status: number;
-    source_url: string;
-    pdf_url: string;
-  }>;
+  const candidatesPool = await listGuidelinesRaw(5000);
+  const rawCandidates = candidatesPool
+    .filter((candidate) => {
+      const lowerName = candidate.name.toLowerCase();
+      if (!queryTokens.length) {
+        return lowerName.includes(fallbackDiagnosis);
+      }
+      return queryTokens.some((token) => lowerName.includes(token));
+    })
+    .sort((left, right) => parseDate(right.publish_date) - parseDate(left.publish_date));
 
   if (!rawCandidates.length) {
     return [];
@@ -320,7 +291,7 @@ export function selectApplicableGuidelines(
     .slice(0, limit);
 }
 
-export function listGuidelineSources(limit = 500): Array<{
+export async function listGuidelineSources(limit = 500): Promise<Array<{
   id: string;
   name: string;
   publish_date: string | null;
@@ -328,37 +299,16 @@ export function listGuidelineSources(limit = 500): Array<{
   source_url: string;
   pdf_url: string;
   section_count: number;
-}> {
-  initDb();
-  const database = getDb();
-
-  const rows = database
-    .prepare(
-      `
-      SELECT
-        g.id,
-        g.name,
-        g.publish_date,
-        g.status,
-        g.source_url,
-        g.pdf_url,
-        COUNT(gs.section_id) AS section_count
-      FROM guidelines g
-      LEFT JOIN guideline_sections gs ON gs.guideline_id = g.id
-      GROUP BY g.id
-      ORDER BY g.publish_date DESC
-      LIMIT ?
-    `,
-    )
-    .all(limit) as Array<Record<string, unknown>>;
+}>> {
+  const rows = await listGuidelineSourcesWithSectionCounts(limit);
 
   return rows.map((row) => ({
-    id: String(row.id),
-    name: String(row.name),
-    publish_date: row.publish_date ? String(row.publish_date) : null,
-    status: Number(row.status),
-    source_url: String(row.source_url),
-    pdf_url: String(row.pdf_url),
+    id: row.id,
+    name: row.name,
+    publish_date: row.publish_date,
+    status: row.status,
+    source_url: row.source_url,
+    pdf_url: row.pdf_url,
     section_count: Number(row.section_count ?? 0),
   }));
 }

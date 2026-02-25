@@ -14,15 +14,12 @@ import {
 import { SectionCard } from "@/components/section-card";
 import { MetricChip } from "@/components/metric-chip";
 import { sampleCaseInput } from "@/lib/sample-data";
-import { SOURCE_CONFIG, SOURCE_IDS } from "@/lib/sources";
 import type {
   CaseInput,
   DoctorValidationResponse,
   ExcludedPersonalDataItem,
   PlannedDrug,
   RetrievalMode,
-  SourceId,
-  SourcePolicy,
   TreatmentHistoryEntry,
   ValidationResult,
 } from "@/lib/types";
@@ -40,11 +37,6 @@ type ParseResponse = {
 
 const defaultCase = sampleCaseInput;
 const retrievalModes: RetrievalMode[] = ["standard"];
-const DEFAULT_SOURCE_SELECTION: SourceId[] = ["minzdrav"];
-const DEFAULT_SOURCE_POLICY: Record<string, SourcePolicy> = {
-  minzdrav: "LOCAL_ONLY",
-};
-const sourcePolicyOptions: SourcePolicy[] = ["LOCAL_ONLY", "LOCAL_THEN_ONLINE", "DISABLED"];
 
 function parseLines(input: string): string[] {
   return input
@@ -791,10 +783,7 @@ export default function DoctorPage() {
   const [excludedPersonalData, setExcludedPersonalData] = useState<ExcludedPersonalDataItem[]>([]);
   const [privacyNotice, setPrivacyNotice] = useState("");
 
-  const [sourceSelection, setSourceSelection] = useState<SourceId[]>(DEFAULT_SOURCE_SELECTION);
-  const [sourcePolicy, setSourcePolicy] = useState<Record<string, SourcePolicy>>(DEFAULT_SOURCE_POLICY);
   const [retrievalMode, setRetrievalMode] = useState<RetrievalMode>("standard");
-  const [onlineFallback, setOnlineFallback] = useState(false);
 
   const [result, setResult] = useState<DoctorValidationResponse | null>(null);
   const [parsing, setParsing] = useState(false);
@@ -950,16 +939,6 @@ export default function DoctorPage() {
     setTreatmentHistory(caseInput.treatment_history ?? []);
   }
 
-  function toggleSource(source: SourceId) {
-    setSourceSelection((prev) => {
-      if (prev.includes(source)) {
-        const next = prev.filter((value) => value !== source);
-        return next.length > 0 ? next : ["minzdrav"];
-      }
-      return [...prev, source];
-    });
-  }
-
   async function handleParseInput() {
     setParsing(true);
     setError(null);
@@ -1011,10 +990,7 @@ export default function DoctorPage() {
         },
         body: JSON.stringify({
           case_input: payloadPreview,
-          source_selection: sourceSelection,
-          source_policy: sourcePolicy,
           retrieval_mode: retrievalMode,
-          online_fallback: onlineFallback,
         }),
       });
 
@@ -1440,38 +1416,13 @@ export default function DoctorPage() {
         >
           <div className="space-y-4 rounded-xl border border-[#2f5278] bg-[#0d2138]/70 p-3">
             <div>
-              <p className="text-xs uppercase tracking-[0.12em] text-[#8fb6dd]">
-                Источники KR (по умолчанию выбран только Минздрав РФ)
+              <p className="text-xs uppercase tracking-[0.12em] text-[#8fb6dd]">Источники KR</p>
+              <p className="mt-2 rounded-lg border border-[#2b4a6b] bg-[#0c2036]/80 px-3 py-2 text-sm text-[#d7ecff]">
+                Автоматический режим: используется локальная база Минздрава РФ (без online fallback и без ручного выбора).
               </p>
-              <div className="mt-2 grid gap-2 md:grid-cols-2">
-                {SOURCE_IDS.map((source) => (
-                  <div key={source} className="rounded-lg border border-[#2b4a6b] bg-[#0c2036]/80 p-2">
-                    <label className="flex items-center gap-2 text-sm text-[#d7ecff]">
-                      <input type="checkbox" checked={sourceSelection.includes(source)} onChange={() => toggleSource(source)} />
-                      {SOURCE_CONFIG[source].label}
-                    </label>
-                    <select
-                      value={sourcePolicy[source] ?? SOURCE_CONFIG[source].defaultPolicy}
-                      onChange={(event) =>
-                        setSourcePolicy((prev) => ({
-                          ...prev,
-                          [source]: event.target.value as SourcePolicy,
-                        }))
-                      }
-                      className="mt-2 w-full rounded-md border border-[#2e4f73] bg-[#0d2138] px-2 py-1 text-xs text-[#cfe8ff]"
-                    >
-                      {sourcePolicyOptions.map((policy) => (
-                        <option key={`${source}-${policy}`} value={policy}>
-                          {policy}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                ))}
-              </div>
             </div>
 
-            <div className="grid gap-3 md:grid-cols-2">
+            <div className="grid gap-3">
               <label className="space-y-2">
                 <span className="text-xs uppercase tracking-[0.12em] text-[#8fb6dd]">Модель</span>
                 <select
@@ -1485,11 +1436,6 @@ export default function DoctorPage() {
                     </option>
                   ))}
                 </select>
-              </label>
-
-              <label className="flex items-center gap-2 pt-7 text-sm text-[#d7ecff]">
-                <input type="checkbox" checked={onlineFallback} onChange={(event) => setOnlineFallback(event.target.checked)} />
-                Online fallback (если локально не найдено)
               </label>
             </div>
 

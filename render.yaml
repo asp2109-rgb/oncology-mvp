@@ -13,8 +13,18 @@ services:
         value: production
       - key: NODE_VERSION
         value: 22
-      - key: ONCO_DB_PATH
-        value: data/oncology.deploy.db
+      - key: ONCO_DB_PROVIDER
+        value: supabase
+      - key: ONCO_DB_STRICT_SUPABASE
+        value: "true"
+      - key: SUPABASE_BATCH_SIZE
+        value: "500"
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
+        sync: false
       - key: OPENAI_API_KEY
         sync: false
       - key: OPENAI_MODEL
