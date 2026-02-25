@@ -97,9 +97,18 @@ PUBLIC_DOCS_URL=https://your-docs-url
 ```bash
 npm run db:prepare-deploy
 ```
-По умолчанию сохраняются 40 последних КР. Для большего охвата:
+По умолчанию скрипт пытается сохранить до 40 последних КР, но автоматически ужимает базу до безопасного размера (по умолчанию до 95 MB), чтобы файл можно было загрузить в репозиторий и развернуть на Render.
+
+Полезные параметры:
 ```bash
-ONCO_KEEP_GUIDELINES=18 npm run db:prepare-deploy
+# Запросить больше КР (скрипт сам ужмет по лимиту размера)
+ONCO_KEEP_GUIDELINES=60 npm run db:prepare-deploy
+
+# Явно задать лимит итогового файла deploy-БД
+ONCO_DEPLOY_MAX_MB=95 npm run db:prepare-deploy
+
+# Нижняя граница, ниже которой авто-ужатие не пойдет
+ONCO_MIN_KEEP_GUIDELINES=14 npm run db:prepare-deploy
 ```
 2. Убедитесь, что в репозитории есть:
 - `render.yaml`
