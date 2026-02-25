@@ -1,0 +1,53 @@
+flowchart TB
+    subgraph UI["UI слой (Next.js pages)"]
+      UI1["/doctor"]
+      UI2["/patient"]
+      UI3["/benchmark"]
+      UI4["/sources"]
+    end
+
+    subgraph API["API слой (Route Handlers)"]
+      A1["case/parse"]
+      A2["doctor/validate"]
+      A3["patient/explain"]
+      A4["guidelines/search"]
+      A5["sources/status + sources/sync"]
+      A6["trials/search"]
+      A7["benchmark/run + benchmark/latest"]
+      A8["health"]
+    end
+
+    subgraph Core["Core слой"]
+      C1["case-parser.ts"]
+      C2["validation/rule-engine.ts"]
+      C3["retrieval.ts"]
+      C4["search/providers.ts"]
+      C5["guidelines.ts"]
+      C6["doctor-llm.ts / llm.ts"]
+      C7["benchmark.ts"]
+      C8["trials.ts"]
+      C9["source-sync.ts"]
+    end
+
+    subgraph Data["Data слой"]
+      D1["SQLite (better-sqlite3)"]
+      D2["FTS5 indexes"]
+      D3["tables: guidelines, chunks, source_documents, runs, cache, logs"]
+    end
+
+    subgraph Ext["Внешние источники"]
+      X1["Минздрав API"]
+      X2["RUSSCO / NCCN / ESMO / ASCO / FEMB"]
+      X3["PubMed API"]
+      X4["ClinicalTrials.gov API v2"]
+      X5["OpenAI API"]
+    end
+
+    UI --> API
+    API --> Core
+    Core --> Data
+    C9 --> Ext
+    C8 --> X4
+    C6 --> X5
+    C5 --> D1
+    C3 --> D2

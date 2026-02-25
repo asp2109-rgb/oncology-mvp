@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Activity, BookOpenCheck, Microscope, ShieldCheck } from "lucide-react";
+import { BookOpenCheck, Microscope, ShieldCheck } from "lucide-react";
 import { SectionCard } from "@/components/section-card";
 
 const featureCards = [
@@ -16,13 +16,6 @@ const featureCards = [
     description:
       "Понятное объяснение результатов проверки, вопросы для врача и прозрачные ссылки на источники.",
     icon: BookOpenCheck,
-  },
-  {
-    href: "/benchmark",
-    title: "Панель бенчмарка",
-    description:
-      "Ретроспектива и синтетика: точность, precision/recall, задержка и охват проверок.",
-    icon: Activity,
   },
   {
     href: "/sources",

@@ -1,11 +1,72 @@
-# Presentation (9 slides)
+# Презентация (9 слайдов) с пометками MVP
 
-1. Problem: guideline adherence gap in oncology workflows
-2. Solution: AI protocol validation assistant (doctor + patient modes)
-3. Input-Process-Output model and system boundaries
-4. Data strategy: Minzdrav oncology corpus + retrospective timeline + synthetic scenarios
-5. Architecture: Next.js + SQLite FTS + rule engine + optional LLM
-6. Live demo flow: `/doctor` -> `/patient` -> `/benchmark` -> `/sources`
-7. Metrics: accuracy, precision/recall mismatch, latency, coverage, traceability
-8. Risks and controls: safety, non-autonomous usage, de-identified cases
-9. Roadmap: pgvector/RAG plugin expansion, deeper case datasets, pilot workflow integration
+Легенда для слайдов:
+- `[MVP]` уже реализовано в текущем прототипе.
+- `[Post-MVP]` следующий этап, не заявляем как готовую функциональность.
+
+## 1. Титульный слайд: идея и ценность
+- Название продукта: `AI-помощник для проверки протоколов онколечения`.
+- Ценность: сократить ручную проверку рекомендаций и повысить прозрачность обоснования.
+- `[MVP]` Два пользовательских режима: врач и пациент.
+- `[Post-MVP]` Интеграция в клинический контур (МИС/EMR).
+
+## 2. Проблема и боли пользователя
+- Врач тратит много времени на сверку назначений с КР и обновлениями.
+- Пациенту сложно понять, почему выбран именно такой план лечения.
+- Нужна проверка с учетом даты лечения (`as_of_date`) и версии рекомендаций.
+- `[MVP]` Ретроспективная проверка + объяснение пациенту простым языком.
+- `[Post-MVP]` Потоковая проверка в реальном времени внутри МИС.
+
+## 3. Решение и пользовательский путь
+- Путь врача: загрузка кейса -> автопарсинг -> валидация -> отчет с доказательствами.
+- Путь пациента: объяснение результата тем же кейсом, но простым языком.
+- `[MVP]` `/doctor`, `/patient`, структурированный результат + ссылки на источники.
+- `[Post-MVP]` Ролевой доступ, командная работа, аудит действий.
+
+## 4. Модель Input -> Process -> Output
+- `Input`: обезличенный клинический кейс (файл или текст).
+- `Process`: парсинг -> выбор релевантных КР по диагнозу и дате -> retrieval -> rule engine -> (опционально) LLM-ревью.
+- `Output`: статус соответствия, несоответствия, предупреждения, evidence, трассируемость.
+- `[MVP]` Поддержка `pdf/doc/docx/txt/md/csv/json/...` + fallback.
+- `[Post-MVP]` OCR-пайплайн для сканов и конвейер контроля качества разметки.
+
+## 5. Что реализовано в MVP (демо-объем)
+- Интерфейсы: `/doctor`, `/patient`, `/benchmark`, `/sources`.
+- API: `/api/doctor/validate`, `/api/patient/explain`, `/api/case/parse`, `/api/guidelines/search`, `/api/sources/*`, `/api/trials/search`.
+- Источники: Минздрав РФ + source-catalog (RUSSCO, NCCN, ESMO, ASCO, PubMed, FEMB).
+- `[MVP]` Rules-first архитектура и online fallback.
+- `[Post-MVP]` SLA/HA, продовая эксплуатация и регуляторный контур.
+
+## 6. Технологический стек
+- Frontend: `Next.js 16`, `React 19`, `TypeScript`, `Tailwind CSS 4`.
+- Backend: `Next.js Route Handlers` (Node runtime), модульный сервисный слой.
+- Данные: `SQLite + FTS5` (`better-sqlite3`) для локального полнотекстового поиска.
+- AI: rule engine + retrieval modes (`auto/standard/hyde/fusion/graphrag_lite/kag/agentic`) + OpenAI для врачебного/пациентского LLM-слоя.
+- `[MVP]` Локальная БД и детерминированная проверка.
+- `[Post-MVP]` Векторная БД/knowledge graph и масштабирование на кластере.
+
+## 7. Результаты тестирования и метрики
+- Наборы: `retrospective + synthetic + literature` (единый benchmark pipeline).
+- Метрики: `protocol_match_accuracy`, `mismatch precision/recall`, `median_validation_time`, `case_coverage`, `source_traceability_rate`.
+- Снимок из отчета MVP: accuracy `0.60`, precision `0.50`, recall `1.00`, median `270 мс`, coverage `1.00`, traceability `1.00`.
+- `[MVP]` Автоматический запуск и сохранение отчета.
+- `[Post-MVP]` Валидация на расширенном реальном датасете клиник.
+
+## 8. Риски и меры контроля
+- Ограничения: не назначает лечение, итоговое решение всегда за врачом.
+- Безопасность: только обезличенные кейсы.
+- Технические риски: неполное покрытие источников, зависимость от внешних API, недоступность LLM.
+- Контроли: `rules-only fallback`, source-policy, предупреждения, обязательная ссылка на evidence.
+- `[MVP]` Реализовано в текущем API и UI.
+- `[Post-MVP]` Формальный клинический аудит и регуляторные процедуры.
+
+## 9. Roadmap и план внедрения
+- Шаг 1: закрыть пилотные пользовательские сценарии (врач/пациент/эксперт).
+- Шаг 2: расширить корпус кейсов и автоматизировать регулярный source-sync.
+- Шаг 3: интеграция с МИС, роли, аудит, эксплуатационный мониторинг.
+- `[MVP]` Пилотный прототип и документация готовы.
+- `[Post-MVP]` Масштабирование, интеграции и промышленная эксплуатация.
+
+## Быстрая ремарка для доклада
+- Формулировка на каждом слайде: `Что уже работает в MVP` и `Что будет в следующей итерации`.
+- Не смешивать обещания: все интеграции с МИС, продовое масштабирование и регуляторный контур отмечать только как `Post-MVP`.

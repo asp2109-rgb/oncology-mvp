@@ -1,0 +1,13 @@
+flowchart LR
+    U1["Врач"] --> D["/doctor"]
+    U2["Пациент"] --> P["/patient"]
+    U3["Эксперт/Команда"] --> B["/benchmark"]
+    U3 --> S["/sources"]
+
+    D --> API1["POST /api/case/parse"]
+    D --> API2["POST /api/doctor/validate"]
+    P --> API3["POST /api/patient/explain"]
+    B --> API4["POST /api/benchmark/run"]
+    B --> API5["GET /api/benchmark/latest"]
+    S --> API6["GET /api/sources/status"]
+    S --> API7["POST /api/sources/sync"]

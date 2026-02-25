@@ -11,12 +11,17 @@
     "test:watch": "vitest",
     "ingest:minzdrav": "tsx scripts/ingest-minzdrav.ts",
     "db:init": "tsx scripts/init-db.ts",
+    "icd10:sync": "tsx scripts/sync-icd10.ts",
     "db:prepare-deploy": "bash scripts/prepare-deploy-db.sh",
     "sources:sync": "tsx scripts/sync-sources.ts",
     "benchmark:sample": "tsx scripts/run-benchmark-sample.ts",
-    "qr:generate": "tsx scripts/generate-qr.ts"
+    "qr:generate": "tsx scripts/generate-qr.ts",
+    "inspect:validation": "tsx scripts/inspect-validation.ts"
   },
   "dependencies": {
+    "@react-three/drei": "^10.7.7",
+    "@react-three/fiber": "^9.5.0",
+    "@types/pdfkit": "^0.17.5",
     "better-sqlite3": "^12.6.2",
     "clsx": "^2.1.1",
     "date-fns": "^4.1.0",
@@ -24,9 +29,11 @@
     "mammoth": "^1.11.0",
     "next": "16.1.6",
     "pdf-parse": "^2.4.5",
+    "pdfkit": "^0.17.2",
     "qrcode": "^1.5.4",
     "react": "19.2.3",
     "react-dom": "19.2.3",
+    "three": "^0.183.1",
     "word-extractor": "^1.0.4",
     "zod": "^4.3.6"
   },

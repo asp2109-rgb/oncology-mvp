@@ -81,7 +81,7 @@ export default function PatientPage() {
     <div className="grid gap-6 lg:grid-cols-[1fr_1fr]">
       <SectionCard
         title="Режим пациента"
-        subtitle="Понятное объяснение, почему текущий план соответствует рекомендациям или требует уточнения"
+        subtitle="Понятное объяснение, зачем назначено текущее лечение, на основе российских клинических рекомендаций"
       >
         <div className="space-y-4">
           <label className="space-y-2">
@@ -128,7 +128,7 @@ export default function PatientPage() {
 
       <SectionCard
         title="Результат объяснения"
-        subtitle="Ответ формируется через OpenAI LLM на основании текущего кейса и найденных источников"
+        subtitle="Ответ формируется через OpenAI LLM по данным кейса и российским клиническим рекомендациям"
       >
         {!response ? (
           <p className="text-sm text-[#afcae4]">Запустите ассистента, чтобы получить ответ LLM в пациентском формате.</p>
@@ -143,7 +143,7 @@ export default function PatientPage() {
             </div>
 
             <div className="rounded-2xl border border-[#2d4c6f] bg-[#0c2036] p-4">
-              <p className="text-xs uppercase tracking-[0.14em] text-[#89b1d8]">Кратко</p>
+              <p className="text-xs uppercase tracking-[0.14em] text-[#89b1d8]">Вывод LLM</p>
               <p className="mt-2 leading-6">{response.explanation.plain_summary}</p>
             </div>
 

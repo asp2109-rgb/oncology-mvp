@@ -1,5 +1,6 @@
 import { SourceDocumentProvider, RuleIndexProvider, SqlFtsProvider, searchWithProviders } from "@/lib/search/providers";
 import { searchOnlineSources } from "@/lib/search/online";
+import { rankHitsForReferenceDate, resolveReferenceDate } from "@/lib/search/retrospective";
 import { resolveSourcePolicy } from "@/lib/sources";
 import type { CaseInput, RetrievalMode, SearchHit, SourceId, SourcePolicy } from "@/lib/types";
 
@@ -16,6 +17,7 @@ type RetrievalOptions = {
   onlineFallback: boolean;
   guidelineIds?: string[];
   sectionIds?: string[];
+  referenceDate?: string;
   limit?: number;
 };
 
@@ -157,6 +159,11 @@ export async function retrieveEvidence(options: RetrievalOptions): Promise<{
   const mode = options.mode === "auto" ? resolveAutoMode(options.caseInput, options.query) : options.mode;
   const limit = options.limit ?? 20;
   const variants = buildQueryVariants(mode, options.caseInput, options.query);
+  const referenceDate = resolveReferenceDate({
+    eventDate: options.referenceDate,
+    asOfDate: options.caseInput.as_of_date,
+    query: options.query,
+  });
   const resolvedPolicy = resolveSourcePolicy(options.sourceSelection, options.sourcePolicy);
   const enabledSources = options.sourceSelection.filter((source) => resolvedPolicy[source] !== "DISABLED");
 
@@ -165,12 +172,13 @@ export async function retrieveEvidence(options: RetrievalOptions): Promise<{
       guideline_ids: options.guidelineIds,
       section_ids: options.sectionIds,
       sources: enabledSources,
+      as_of_date: referenceDate ?? undefined,
       limit: Math.max(6, Math.min(25, limit)),
     }),
   );
 
   let merged = mode === "fusion" ? reciprocalRankFusion(localLists) : uniqBySourceChunk(localLists.flat());
-  merged = merged.sort((a, b) => a.score - b.score);
+  merged = rankHitsForReferenceDate(merged, referenceDate);
 
   const warnings: string[] = [];
   const localBySource = new Map<SourceId, number>();
@@ -188,9 +196,14 @@ export async function retrieveEvidence(options: RetrievalOptions): Promise<{
     });
 
     if (fallbackSources.length) {
-      const onlineHits = await searchOnlineSources(options.query, fallbackSources, Math.max(4, Math.floor(limit / 2)));
+      const onlineHits = await searchOnlineSources(
+        options.query,
+        fallbackSources,
+        Math.max(4, Math.floor(limit / 2)),
+        { as_of_date: referenceDate ?? undefined },
+      );
       if (onlineHits.length) {
-        merged = uniqBySourceChunk([...merged, ...onlineHits]).sort((a, b) => a.score - b.score);
+        merged = rankHitsForReferenceDate(uniqBySourceChunk([...merged, ...onlineHits]), referenceDate);
         warnings.push(
           `Для части источников использован online fallback: ${fallbackSources.join(", ")}`,
         );
@@ -198,7 +211,7 @@ export async function retrieveEvidence(options: RetrievalOptions): Promise<{
     }
   }
 
-  const finalHits = merged.slice(0, limit);
+  const finalHits = rankHitsForReferenceDate(merged, referenceDate, limit);
   const ruFirstPassed =
     !enabledSources.includes("minzdrav") ||
     finalHits.some((hit) => hit.source === "minzdrav" && hit.access_mode === "local");

@@ -1,0 +1,20 @@
+flowchart LR
+    MZ["scripts/ingest-minzdrav.ts"] --> A["GetJsonClinrecsFilterV2"]
+    MZ --> B["GetClinrec2"]
+    MZ --> C["GetClinrecPdf"]
+    A --> D["guidelines"]
+    B --> E["guideline_sections"]
+    C --> F["recommendation_chunks"]
+    F --> G["recommendation_chunks_fts"]
+
+    SY["/api/sources/sync -> source-sync.ts"] --> S1["minzdrav"]
+    SY --> S2["russco"]
+    SY --> S3["nccn_patient/professional"]
+    SY --> S4["esmo/asco/femb"]
+    SY --> S5["pubmed"]
+    S1 --> SD["source_documents + source_documents_fts"]
+    S2 --> SD
+    S3 --> SD
+    S4 --> SD
+    S5 --> SD
+    SY --> LOG["source_sync_logs"]

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { caseInputSchema } from "@/lib/types";
-import { extractTextFromFile, suggestCaseFromText } from "@/lib/case-parser";
+import { extractTextFromFile, prepareCaseText, suggestCaseFromText } from "@/lib/case-parser";
 
 export const runtime = "nodejs";
 
@@ -52,14 +52,24 @@ export async function POST(request: Request) {
             source: sourceName,
             detected_format: "json_case_input",
             text_length: text.length,
-            preview: text.slice(0, 2000),
+            preview: text,
             warnings,
             case_input: parsedCase.data,
+            excluded_personal_data: [],
+            privacy_notice: "Для JSON-входа предполагается, что обезличивание уже выполнено источником данных.",
           });
         }
       } catch {
         // fallback to text parser
       }
+    }
+
+    const prepared = prepareCaseText(text);
+    if (prepared.anonymized) {
+      warnings = [
+        ...warnings,
+        `Обезличивание выполнено: маскировано ФИО (${prepared.redactedFioCount}) и исключены персональные данные перед извлечением.`,
+      ];
     }
 
     const suggestedCase = suggestCaseFromText(text);
@@ -68,9 +78,11 @@ export async function POST(request: Request) {
       source: sourceName,
       detected_format: detectedFormat,
       text_length: text.length,
-      preview: text.slice(0, 3000),
+      preview: prepared.text,
       warnings,
       case_input: suggestedCase,
+      excluded_personal_data: prepared.excluded_personal_data,
+      privacy_notice: prepared.privacy_notice,
       supported_formats: [
         "pdf",
         "doc",

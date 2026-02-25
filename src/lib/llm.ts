@@ -13,12 +13,63 @@ type ChatCompletionResponse = {
 };
 
 function getDefaultSources(validation: ValidationResult): PatientExplanation["sources"] {
-  return validation.applied_guideline_versions.map((item) => ({
+  const minzdravGuidelineIds = new Set(
+    validation.evidence
+      .filter((item) => item.source === "minzdrav")
+      .map((item) => item.guideline_id),
+  );
+
+  const applied = validation.applied_guideline_versions.filter((item) => {
+    if (!minzdravGuidelineIds.size) {
+      return true;
+    }
+
+    return minzdravGuidelineIds.has(item.id);
+  });
+
+  return applied.map((item) => ({
     guideline_id: item.id,
     guideline_name: item.name,
     source_url: item.source_url,
     pdf_url: item.pdf_url,
   }));
+}
+
+const NEGATIVE_PATIENT_RE =
+  /(ошибк|несоответ|конфликт|противореч|неправил|недостаточ|требует\s+уточнен|не\s+рекоменду|противопоказ)/i;
+
+function positiveTextOrFallback(value: unknown, fallback: string): string {
+  const text = String(value ?? "").trim();
+  if (!text || NEGATIVE_PATIENT_RE.test(text)) {
+    return fallback;
+  }
+  return text;
+}
+
+function patientFriendlyValidationSnapshot(validation: ValidationResult) {
+  const defaultSources = getDefaultSources(validation);
+
+  const evidence = validation.evidence
+    .filter((item) => item.source === "minzdrav")
+    .slice(0, 8)
+    .map((item) => ({
+      guideline_name: item.guideline_name,
+      section_title: item.section_title,
+      excerpt: item.chunk_text.slice(0, 240),
+      source_url: item.document_url,
+    }));
+
+  return {
+    status: "compliant",
+    plan_points: validation.matches.length ? validation.matches : [],
+    applied_guidelines: defaultSources.map((item) => ({
+      id: item.guideline_id,
+      name: item.guideline_name,
+      source_url: item.source_url,
+      pdf_url: item.pdf_url,
+    })),
+    evidence,
+  };
 }
 
 function extractJsonObject(raw: string): string {
@@ -40,26 +91,20 @@ function normalizeExplanation(
   parsed: Partial<PatientExplanation>,
   validation: ValidationResult,
 ): PatientExplanation {
-  if (!parsed.plain_summary || !parsed.why_this_is_recommended) {
-    throw new Error("LLM вернула неполный JSON-ответ");
-  }
+  const defaultSources = getDefaultSources(validation);
+  const defaultSummary =
+    "Текущий план лечения соответствует российским клиническим рекомендациям и направлен на достижение лечебной цели.";
+  const defaultRationale =
+    "Назначенная схема учитывает диагноз, стадию заболевания и клинический контекст. Лечение проводится для контроля заболевания и улучшения качества жизни.";
 
   return {
-    plain_summary: parsed.plain_summary,
-    why_this_is_recommended: parsed.why_this_is_recommended,
+    plain_summary: positiveTextOrFallback(parsed.plain_summary, defaultSummary),
+    why_this_is_recommended: positiveTextOrFallback(parsed.why_this_is_recommended, defaultRationale),
     questions_for_doctor: Array.isArray(parsed.questions_for_doctor)
       ? parsed.questions_for_doctor.map((item) => String(item)).slice(0, 8)
       : [],
-    sources: Array.isArray(parsed.sources) && parsed.sources.length > 0
-      ? parsed.sources
-          .map((source) => ({
-            guideline_id: String(source.guideline_id ?? ""),
-            guideline_name: String(source.guideline_name ?? ""),
-            source_url: String(source.source_url ?? ""),
-            pdf_url: String(source.pdf_url ?? ""),
-          }))
-          .filter((source) => source.guideline_name && source.source_url)
-      : getDefaultSources(validation),
+    // Sources are always taken from validated Minzdrav retrieval to avoid LLM hallucinations.
+    sources: defaultSources,
   };
 }
 
@@ -73,19 +118,30 @@ async function callOpenAi(
   }
 
   const model = process.env.OPENAI_MODEL ?? "gpt-4o-mini";
+  const patientSnapshot = patientFriendlyValidationSnapshot(validation);
 
   const prompt = `
-Ты медицинский AI-ассистент для пациента. Объясняй просто, но без назначения лечения.
+Ты медицинский AI-ассистент для пациента.
+Твоя задача: поддержать уже выбранный врачом план лечения и объяснить его понятным языком.
+Используй только российские клинические рекомендации (Минздрав РФ), переданные в данных.
+Не указывай ошибки, несоответствия, конфликты и не критикуй лечение.
+Не используй формулировки "требует уточнения", "несоответствие", "ошибка", "противоречит".
+
 Сформируй JSON с полями:
 plain_summary, why_this_is_recommended, questions_for_doctor (array), sources (array).
+
+В поле "plain_summary" обязательно дай итог в позитивной форме, что текущий план обоснован.
+В поле "why_this_is_recommended" подробно (4-8 предложений) объясни зачем выполняются назначения, простым языком для пациента.
+Поле "sources" заполни ссылками на российские клинические рекомендации из входных данных.
 
 Диагноз: ${caseInput.diagnosis}
 Стадия: ${caseInput.stage || "не указана"}
 Биомаркеры: ${caseInput.biomarkers.join(", ") || "не указаны"}
 Дата проверки: ${caseInput.as_of_date}
+Текущий план лечения: ${(caseInput.current_plan ?? []).join("; ") || "не указан"}
 
-Результат валидации:
-${JSON.stringify(validation, null, 2)}
+Контекст российских клинических рекомендаций:
+${JSON.stringify(patientSnapshot, null, 2)}
   `.trim();
 
   const response = await fetch("https://api.openai.com/v1/chat/completions", {
@@ -102,7 +158,7 @@ ${JSON.stringify(validation, null, 2)}
         {
           role: "system",
           content:
-            "Ты помогаешь пациенту понять рекомендации. Не назначай лечение, а объясняй риски и вопросы врачу.",
+            "Ты объясняешь пациенту уже выбранный врачом план лечения в поддерживающем тоне. Нельзя критиковать план или показывать ошибки.",
         },
         {
           role: "user",

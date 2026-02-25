@@ -1,0 +1,11 @@
+flowchart TD
+    I["Input: файл/текст кейса"] --> P1["/api/case/parse"]
+    P1 --> N["Нормализация в CaseInput"]
+    N --> G["Выбор версий КР по diagnosis + as_of_date"]
+    G --> R["Retrieval (FTS + RuleIndex + SourceDocs)"]
+    R --> E["Rule Engine валидация"]
+    E --> L{"OPENAI_API_KEY есть?"}
+    L -- "Да" --> M["LLM review (doctor) / patient explanation"]
+    L -- "Нет" --> F["rules-only fallback"]
+    M --> O["Output: статус, mismatches, evidence, traceability"]
+    F --> O

@@ -1,0 +1,18 @@
+sequenceDiagram
+    participant Doc as "UI /doctor"
+    participant API as "/api/doctor/validate"
+    participant Rule as "rule-engine"
+    participant Ret as "retrieval"
+    participant DB as "SQLite + FTS5"
+    participant LLM as "OpenAI"
+
+    Doc->>API: case_input + source_selection + retrieval_mode
+    API->>Rule: validateCase()
+    Rule->>Ret: retrieveEvidence() по пунктам плана
+    Ret->>DB: FTS + rule index + source docs
+    DB-->>Ret: SearchHit[]
+    Ret-->>Rule: hits + confidence + warnings
+    Rule-->>API: ValidationResult
+    API->>LLM: buildDoctorLlmReview() (опционально)
+    LLM-->>API: verdict + rationale + citations
+    API-->>Doc: ValidationResult + llm_review / rules-only

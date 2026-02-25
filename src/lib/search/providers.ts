@@ -1,4 +1,5 @@
 import { getDb, initDb } from "@/lib/db";
+import { rankHitsForReferenceDate } from "@/lib/search/retrospective";
 import { SOURCE_CONFIG } from "@/lib/sources";
 import type { SearchHit, SourceId } from "@/lib/types";
 import { ftsQueryFromText, safeJsonParse } from "@/lib/utils";
@@ -7,6 +8,7 @@ export type SearchContext = {
   guideline_ids?: string[];
   section_ids?: string[];
   sources?: SourceId[];
+  as_of_date?: string;
   limit?: number;
 };
 
@@ -75,6 +77,7 @@ export class SqlFtsProvider implements SearchProvider {
     const limit = context.limit ?? 12;
     const guidelineIds = context.guideline_ids ?? [];
     const sectionIds = context.section_ids ?? [];
+    const asOfDate = context.as_of_date?.trim();
 
     const filters: string[] = [];
     const params: unknown[] = [ftsQuery];
@@ -87,6 +90,11 @@ export class SqlFtsProvider implements SearchProvider {
     if (sectionIds.length) {
       filters.push(`rc.section_id IN (${sectionIds.map(() => "?").join(",")})`);
       params.push(...sectionIds);
+    }
+
+    if (asOfDate) {
+      filters.push("(g.publish_date IS NULL OR date(substr(g.publish_date, 1, 10)) <= date(?))");
+      params.push(asOfDate);
     }
 
     const whereFilters = filters.length ? `AND ${filters.join(" AND ")}` : "";
@@ -143,16 +151,23 @@ export class RuleIndexProvider implements SearchProvider {
     }
 
     const guidelineIds = context.guideline_ids ?? [];
+    const asOfDate = context.as_of_date?.trim();
 
+    const filters: string[] = ["lower(rc.chunk_text) LIKE ?"];
     const params: unknown[] = [`%${normalized}%`];
-    let guidelineFilter = "";
 
     if (guidelineIds.length) {
-      guidelineFilter = `AND rc.guideline_id IN (${guidelineIds.map(() => "?").join(",")})`;
+      filters.push(`rc.guideline_id IN (${guidelineIds.map(() => "?").join(",")})`);
       params.push(...guidelineIds);
     }
 
+    if (asOfDate) {
+      filters.push("(g.publish_date IS NULL OR date(substr(g.publish_date, 1, 10)) <= date(?))");
+      params.push(asOfDate);
+    }
+
     params.push(limit);
+    const whereFilters = filters.join("\n      AND ");
 
     const rows = database
       .prepare(
@@ -180,8 +195,7 @@ export class RuleIndexProvider implements SearchProvider {
       LEFT JOIN guideline_sections gs
         ON gs.guideline_id = rc.guideline_id
         AND gs.section_id = rc.section_id
-      WHERE lower(rc.chunk_text) LIKE ?
-      ${guidelineFilter}
+      WHERE ${whereFilters}
       ORDER BY score ASC, rc.created_at DESC
       LIMIT ?
     `,
@@ -227,7 +241,7 @@ export class SourceDocumentProvider implements SearchProvider {
         NULL AS evidence_level,
         sd.title AS source_anchor,
         sd.url AS document_url,
-        sd.version AS document_version,
+        COALESCE(sd.published_at, sd.version) AS document_version,
         sd.source AS source,
         'local' AS access_mode,
         bm25(source_documents_fts) AS score
@@ -264,7 +278,5 @@ export function searchWithProviders(
     }
   }
 
-  return Array.from(merged.values())
-    .sort((a, b) => a.score - b.score)
-    .slice(0, context.limit ?? 15);
+  return rankHitsForReferenceDate(Array.from(merged.values()), context.as_of_date ?? null, context.limit ?? 15);
 }

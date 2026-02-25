@@ -4,7 +4,6 @@ const links = [
   { href: "/", label: "Обзор" },
   { href: "/doctor", label: "Врач" },
   { href: "/patient", label: "Пациент" },
-  { href: "/benchmark", label: "Бенчмарк" },
   { href: "/sources", label: "Источники" },
 ];
 

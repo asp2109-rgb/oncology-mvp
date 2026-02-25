@@ -56,6 +56,23 @@ export type SourceDocumentRecord = {
   metadata_json: string;
 };
 
+export type LandingLeadRecord = {
+  full_name: string;
+  work_email: string;
+  clinic_name: string;
+  role: string;
+  monthly_cases: number;
+  message: string;
+  consent: number;
+  source: string;
+};
+
+export type DoctorFeedbackRecord = {
+  validation_run_id: string;
+  rating: "up" | "down";
+  comment: string;
+};
+
 function resolveDbPath(): string {
   const configured = process.env.ONCO_DB_PATH;
 
@@ -179,6 +196,18 @@ export function initDb(): void {
 
     CREATE INDEX IF NOT EXISTS idx_validation_created ON validation_runs(created_at DESC);
 
+    CREATE TABLE IF NOT EXISTS doctor_feedback (
+      feedback_id TEXT PRIMARY KEY,
+      validation_run_id TEXT NOT NULL,
+      rating TEXT NOT NULL CHECK(rating IN ('up', 'down')),
+      comment TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (validation_run_id) REFERENCES validation_runs(run_id) ON DELETE CASCADE
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_doctor_feedback_validation_run_id ON doctor_feedback(validation_run_id);
+    CREATE INDEX IF NOT EXISTS idx_doctor_feedback_created ON doctor_feedback(created_at DESC);
+
     CREATE TABLE IF NOT EXISTS benchmark_runs (
       bench_id TEXT PRIMARY KEY,
       dataset_version TEXT NOT NULL,
@@ -187,6 +216,22 @@ export function initDb(): void {
     );
 
     CREATE INDEX IF NOT EXISTS idx_benchmark_created ON benchmark_runs(created_at DESC);
+
+    CREATE TABLE IF NOT EXISTS landing_leads (
+      lead_id TEXT PRIMARY KEY,
+      full_name TEXT NOT NULL,
+      work_email TEXT NOT NULL,
+      clinic_name TEXT NOT NULL,
+      role TEXT NOT NULL,
+      monthly_cases INTEGER NOT NULL,
+      message TEXT NOT NULL DEFAULT '',
+      consent INTEGER NOT NULL DEFAULT 1,
+      source TEXT NOT NULL DEFAULT 'landing',
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_landing_leads_created_at ON landing_leads(created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_landing_leads_work_email ON landing_leads(work_email);
 
     CREATE TABLE IF NOT EXISTS trials_cache (
       query_key TEXT PRIMARY KEY,
@@ -351,14 +396,15 @@ export function getGuidelineCounts(): { guidelines: number; chunks: number } {
 }
 
 export function saveValidationRun(params: {
-  run_id: string;
+  run_id?: string;
   case_id: string | null;
   as_of_date: string;
   result: ValidationResult;
   latency_ms: number;
-}): void {
+}): string {
   initDb();
   const database = getDb();
+  const runId = params.run_id ?? randomUUID();
 
   database
     .prepare(
@@ -372,8 +418,47 @@ export function saveValidationRun(params: {
     )
     .run({
       ...params,
+      run_id: runId,
       result_json: JSON.stringify(params.result),
     });
+
+  return runId;
+}
+
+export function saveDoctorFeedback(record: DoctorFeedbackRecord): { feedback_id: string; created_at: string } {
+  initDb();
+  const database = getDb();
+  const feedback_id = randomUUID();
+  const created_at = nowIso();
+
+  database
+    .prepare(
+      `
+      INSERT INTO doctor_feedback (
+        feedback_id,
+        validation_run_id,
+        rating,
+        comment,
+        created_at
+      ) VALUES (
+        @feedback_id,
+        @validation_run_id,
+        @rating,
+        @comment,
+        @created_at
+      )
+    `,
+    )
+    .run({
+      feedback_id,
+      created_at,
+      ...record,
+    });
+
+  return {
+    feedback_id,
+    created_at,
+  };
 }
 
 export function saveBenchmarkRun(params: {
@@ -398,6 +483,53 @@ export function saveBenchmarkRun(params: {
       ...params,
       metrics_json: JSON.stringify(params.report),
     });
+}
+
+export function saveLandingLead(record: LandingLeadRecord): { lead_id: string; created_at: string } {
+  initDb();
+  const database = getDb();
+
+  const lead_id = randomUUID();
+  const created_at = nowIso();
+
+  database
+    .prepare(
+      `
+      INSERT INTO landing_leads (
+        lead_id,
+        full_name,
+        work_email,
+        clinic_name,
+        role,
+        monthly_cases,
+        message,
+        consent,
+        source,
+        created_at
+      ) VALUES (
+        @lead_id,
+        @full_name,
+        @work_email,
+        @clinic_name,
+        @role,
+        @monthly_cases,
+        @message,
+        @consent,
+        @source,
+        @created_at
+      )
+    `,
+    )
+    .run({
+      lead_id,
+      created_at,
+      ...record,
+    });
+
+  return {
+    lead_id,
+    created_at,
+  };
 }
 
 export function getLatestBenchmarkRun(): BenchmarkReport | null {

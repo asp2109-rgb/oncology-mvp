@@ -38,7 +38,9 @@ describe("database schema", () => {
     expect(names).toContain("recommendation_chunks");
     expect(names).toContain("cases");
     expect(names).toContain("validation_runs");
+    expect(names).toContain("doctor_feedback");
     expect(names).toContain("benchmark_runs");
+    expect(names).toContain("landing_leads");
     expect(names).toContain("trials_cache");
     expect(names).toContain("source_documents");
     expect(names).toContain("source_sync_logs");

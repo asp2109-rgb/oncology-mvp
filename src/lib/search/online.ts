@@ -1,4 +1,5 @@
 import { readTrialsCache, upsertTrialsCache } from "@/lib/db";
+import { rankHitsForReferenceDate } from "@/lib/search/retrospective";
 import { SOURCE_CONFIG } from "@/lib/sources";
 import type { SearchHit, SourceId } from "@/lib/types";
 
@@ -39,8 +40,8 @@ function portalHit(source: SourceId, query: string, score: number): SearchHit {
   };
 }
 
-async function searchPubMed(query: string, limit: number): Promise<SearchHit[]> {
-  const key = `online:pubmed:${query}:${limit}`;
+async function searchPubMed(query: string, limit: number, asOfDate?: string): Promise<SearchHit[]> {
+  const key = `online:pubmed:${query}:${limit}:${asOfDate ?? "none"}`;
   const cached = readTrialsCache(key);
 
   if (cached && shouldUseCache(cached.fetched_at)) {
@@ -120,20 +121,30 @@ async function searchPubMed(query: string, limit: number): Promise<SearchHit[]> 
     });
   }
 
-  upsertTrialsCache(key, hits);
-  return hits.slice(0, limit);
+  const ranked = rankHitsForReferenceDate(hits, asOfDate ?? null, limit);
+  if (!ranked.length) {
+    return [portalHit("pubmed", query, 210)];
+  }
+
+  upsertTrialsCache(key, ranked);
+  return ranked;
 }
+
+type OnlineSearchOptions = {
+  as_of_date?: string;
+};
 
 export async function searchOnlineSources(
   query: string,
   sources: SourceId[],
   limit = 6,
+  options: OnlineSearchOptions = {},
 ): Promise<SearchHit[]> {
   const enabledSources = Array.from(new Set(sources));
   const hits: SearchHit[] = [];
 
   if (enabledSources.includes("pubmed")) {
-    const pubmedHits = await searchPubMed(query, Math.max(1, Math.min(limit, 10)));
+    const pubmedHits = await searchPubMed(query, Math.max(1, Math.min(limit, 10)), options.as_of_date);
     hits.push(...pubmedHits);
   }
 
@@ -144,5 +155,5 @@ export async function searchOnlineSources(
     hits.push(portalHit(source, query, 300 + hits.length));
   }
 
-  return hits.slice(0, limit);
+  return rankHitsForReferenceDate(hits, options.as_of_date ?? null, limit);
 }

@@ -114,3 +114,6 @@ ONCO_KEEP_GUIDELINES=18 npm run db:prepare-deploy
 - `docs/architecture.md`
 - `deliverables/presentation-9-slides.md`
 - `deliverables/poster-a1-content.md`
+- `deliverables/tech-stack-and-mvp-boundary.md`
+- `deliverables/expert-docs-pack-ru.md`
+- `deliverables/architecture-schemes-ru.md`

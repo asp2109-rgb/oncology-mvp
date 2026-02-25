@@ -1,0 +1,17 @@
+flowchart LR
+    subgraph MVP["MVP (сделано)"]
+      M1["Doctor + Patient UI"]
+      M2["Rule engine + retrieval modes"]
+      M3["SQLite + FTS5"]
+      M4["Минздрав ingestion + source-catalog sync"]
+      M5["Benchmark + метрики"]
+      M6["LLM-слой с fallback"]
+    end
+
+    subgraph NEXT["Post-MVP (следующий этап)"]
+      P1["МИС/EMR интеграции"]
+      P2["OCR pipeline для сканов"]
+      P3["Роли, SSO, аудит"]
+      P4["Масштабирование и SLA"]
+      P5["Регуляторный контур"]
+    end

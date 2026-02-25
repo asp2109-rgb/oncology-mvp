@@ -31,6 +31,106 @@ function normalizeToken(token: string): string {
     .trim();
 }
 
+function toUtcTimestamp(year: number, month: number, day: number): number | null {
+  if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) {
+    return null;
+  }
+
+  if (year < 1900 || year > 2100 || month < 1 || month > 12 || day < 1 || day > 31) {
+    return null;
+  }
+
+  const value = Date.UTC(year, month - 1, day);
+  const date = new Date(value);
+  if (
+    date.getUTCFullYear() !== year ||
+    date.getUTCMonth() !== month - 1 ||
+    date.getUTCDate() !== day
+  ) {
+    return null;
+  }
+
+  return value;
+}
+
+export function parseLooseDate(value: string | null | undefined): number | null {
+  if (!value) {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  const isoDay = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})(?:[T\s].*)?$/);
+  if (isoDay) {
+    return toUtcTimestamp(Number(isoDay[1]), Number(isoDay[2]), Number(isoDay[3]));
+  }
+
+  const dayMonthYear = trimmed.match(/^(\d{1,2})[\.\/-](\d{1,2})[\.\/-](\d{2,4})$/);
+  if (dayMonthYear) {
+    const rawYear = Number(dayMonthYear[3]);
+    const year =
+      dayMonthYear[3].length === 2 ? (rawYear >= 70 ? 1900 + rawYear : 2000 + rawYear) : rawYear;
+    return toUtcTimestamp(year, Number(dayMonthYear[2]), Number(dayMonthYear[1]));
+  }
+
+  const yearMonth = trimmed.match(/^(\d{4})-(\d{2})$/);
+  if (yearMonth) {
+    return toUtcTimestamp(Number(yearMonth[1]), Number(yearMonth[2]), 1);
+  }
+
+  const yearOnly = trimmed.match(/^(\d{4})$/);
+  if (yearOnly) {
+    return toUtcTimestamp(Number(yearOnly[1]), 1, 1);
+  }
+
+  const parsed = Date.parse(trimmed);
+  if (!Number.isNaN(parsed)) {
+    return parsed;
+  }
+
+  const embeddedYear = trimmed.match(/(?:^|\D)((?:19|20)\d{2})(?:\D|$)/);
+  if (embeddedYear) {
+    return toUtcTimestamp(Number(embeddedYear[1]), 1, 1);
+  }
+
+  return null;
+}
+
+export function normalizeDateOnly(value: string | null | undefined): string | null {
+  const timestamp = parseLooseDate(value);
+  if (timestamp === null) {
+    return null;
+  }
+
+  return new Date(timestamp).toISOString().slice(0, 10);
+}
+
+export function extractFirstDate(input: string): string | null {
+  const candidates: Array<{ index: number; raw: string }> = [];
+  const patterns = [/\b\d{4}-\d{2}-\d{2}\b/g, /\b\d{1,2}[\.\/-]\d{1,2}[\.\/-]\d{2,4}\b/g];
+
+  for (const pattern of patterns) {
+    for (const match of input.matchAll(pattern)) {
+      const raw = match[0];
+      const index = match.index ?? Number.POSITIVE_INFINITY;
+      candidates.push({ index, raw });
+    }
+  }
+
+  candidates.sort((a, b) => a.index - b.index);
+  for (const candidate of candidates) {
+    const normalized = normalizeDateOnly(candidate.raw);
+    if (normalized) {
+      return normalized;
+    }
+  }
+
+  return null;
+}
+
 export function safeJsonParse<T>(value: string | null, fallback: T): T {
   if (!value) {
     return fallback;
@@ -160,24 +260,73 @@ export function buildTags(text: string): string[] {
   return tags;
 }
 
+const FTS_GENERIC_TOKENS = new Set([
+  "лечение",
+  "лечения",
+  "терапия",
+  "терапии",
+  "режим",
+  "протокол",
+  "схема",
+  "схеме",
+  "курс",
+  "курсы",
+  "курсов",
+  "линия",
+  "линии",
+  "день",
+  "дни",
+  "назначено",
+  "назначена",
+  "назначен",
+  "рекомендовано",
+  "рекомендована",
+  "проведение",
+  "проведено",
+  "химиотерапия",
+]);
+
+function isFtsMeaningfulToken(token: string): boolean {
+  if (!token) {
+    return false;
+  }
+  if (!/[a-zа-яё]/i.test(token)) {
+    return false;
+  }
+  if (/^\d+$/.test(token)) {
+    return false;
+  }
+  if (/^\d{6,}(?:г|год)?$/.test(token)) {
+    return false;
+  }
+  if (/^(?:19|20)\d{2}$/.test(token)) {
+    return false;
+  }
+  return true;
+}
+
 export function ftsQueryFromText(input: string): string {
-  const tokens = Array.from(new Set(tokenize(input))).slice(0, 12);
+  const tokens = Array.from(new Set(tokenize(input).filter(isFtsMeaningfulToken))).slice(0, 12);
 
   if (!tokens.length) {
     return "";
   }
 
-  if (tokens.length === 1) {
-    return `${tokens[0]}*`;
+  const preferredTokens = tokens.filter((token) => !FTS_GENERIC_TOKENS.has(token));
+  const mandatoryPool = preferredTokens.length >= 2 ? preferredTokens : tokens;
+  const mandatoryTokens = mandatoryPool.slice(0, Math.min(2, mandatoryPool.length));
+  const optionalTokens = tokens.filter((token) => !mandatoryTokens.includes(token));
+
+  if (mandatoryTokens.length === 1) {
+    return `${mandatoryTokens[0]}*`;
   }
 
-  if (tokens.length === 2) {
-    return `${tokens[0]}* AND ${tokens[1]}*`;
+  if (mandatoryTokens.length === 2 && optionalTokens.length === 0) {
+    return `${mandatoryTokens[0]}* AND ${mandatoryTokens[1]}*`;
   }
 
-  const mandatory = tokens.slice(0, 2).map((token) => `${token}*`).join(" AND ");
-  const optional = tokens
-    .slice(2)
+  const mandatory = mandatoryTokens.map((token) => `${token}*`).join(" AND ");
+  const optional = optionalTokens
     .map((token) => `${token}*`)
     .join(" OR ");
 

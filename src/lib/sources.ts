@@ -19,13 +19,13 @@ export const SOURCE_CONFIG: Record<
     label: "RUSSCO",
     tier: "ru_practice",
     defaultPolicy: "LOCAL_THEN_ONLINE",
-    defaultSelected: true,
+    defaultSelected: false,
   },
   nccn_patient: {
     label: "NCCN (Patients)",
     tier: "international",
     defaultPolicy: "LOCAL_THEN_ONLINE",
-    defaultSelected: true,
+    defaultSelected: false,
   },
   nccn_professional: {
     label: "NCCN (Professional)",
@@ -49,7 +49,7 @@ export const SOURCE_CONFIG: Record<
     label: "PubMed",
     tier: "evidence",
     defaultPolicy: "LOCAL_THEN_ONLINE",
-    defaultSelected: true,
+    defaultSelected: false,
   },
   femb: {
     label: "FEMB",
