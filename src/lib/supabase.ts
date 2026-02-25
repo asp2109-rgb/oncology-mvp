@@ -30,6 +30,7 @@ function resolveSupabaseUrlRaw(): ResolvedValue {
     { source: "NEXT_PUBLIC_SUPABASE_URL", value: process.env.NEXT_PUBLIC_SUPABASE_URL },
     { source: "SUPABASE_PROJECT_URL", value: process.env.SUPABASE_PROJECT_URL },
     { source: "NEXT_PUBLIC_SUPABASE_PROJECT_URL", value: process.env.NEXT_PUBLIC_SUPABASE_PROJECT_URL },
+    { source: "SUPABASE_HOST", value: process.env.SUPABASE_HOST },
   ]);
   if (direct.value) {
     return direct;
@@ -61,8 +62,11 @@ function resolveSupabaseKeyRaw(): ResolvedValue {
   return firstPresent([
     { source: "SUPABASE_SERVICE_ROLE_KEY", value: process.env.SUPABASE_SERVICE_ROLE_KEY },
     { source: "SUPABASE_ANON_KEY", value: process.env.SUPABASE_ANON_KEY },
+    { source: "SUPABASE_PUBLISHABLE_KEY", value: process.env.SUPABASE_PUBLISHABLE_KEY },
+    { source: "SUPABASE_KEY", value: process.env.SUPABASE_KEY },
     { source: "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY", value: process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY },
     { source: "NEXT_PUBLIC_SUPABASE_ANON_KEY", value: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY },
+    { source: "NEXT_PUBLIC_SUPABASE_KEY", value: process.env.NEXT_PUBLIC_SUPABASE_KEY },
   ]);
 }
 

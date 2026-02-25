@@ -15,7 +15,7 @@ export async function POST(request: Request) {
         {
           error: "Supabase не активен на сервере",
           details:
-            "ONCO_DB_PROVIDER=supabase, но приложение работает в SQLite fallback. Укажите SUPABASE_URL/NEXT_PUBLIC_SUPABASE_URL (или SUPABASE_PROJECT_REF) и ключ Supabase в окружении Render.",
+            "ONCO_DB_PROVIDER=supabase, но приложение работает в SQLite fallback. Проверьте env в Render: URL (SUPABASE_URL или NEXT_PUBLIC_SUPABASE_URL, либо SUPABASE_PROJECT_REF) и ключ (SUPABASE_SERVICE_ROLE_KEY / NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY / SUPABASE_KEY).",
           db,
         },
         { status: 503 },

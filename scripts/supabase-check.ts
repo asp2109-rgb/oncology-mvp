@@ -7,6 +7,7 @@ import {
   initDb,
   listRecentMinzdravGuidelines,
 } from "../src/lib/db";
+import { getSupabaseConfigState } from "../src/lib/supabase";
 
 function loadEnvFile(fileName: string) {
   const envPath = join(process.cwd(), fileName);
@@ -39,18 +40,24 @@ function loadEnvFile(fileName: string) {
 }
 
 async function main() {
-  loadEnvFile(".env.local");
-  loadEnvFile(".env");
+  const skipDotenv = process.argv.includes("--skip-dotenv");
+  if (!skipDotenv) {
+    loadEnvFile(".env.local");
+    loadEnvFile(".env");
+  }
 
   const requireSupabase = process.argv.includes("--require-supabase");
   const startedAt = performance.now();
 
   initDb();
   const provider = getDbProviderInfo();
+  const supabase = getSupabaseConfigState();
 
   if (requireSupabase && provider.active !== "supabase") {
     throw new Error(
-      `Supabase не активен (requested=${provider.requested}, active=${provider.active}, configured=${provider.supabase_configured}).`,
+      `Supabase не активен (requested=${provider.requested}, active=${provider.active}, configured=${provider.supabase_configured}, url_source=${
+        supabase.url_source ?? "none"
+      }, key_source=${supabase.key_source ?? "none"}).`,
     );
   }
 
@@ -66,6 +73,7 @@ async function main() {
       {
         ok: true,
         provider,
+        supabase,
         counts,
         timing_ms: {
           init: Math.round(beforeQueries - startedAt),
