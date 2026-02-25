@@ -5,7 +5,7 @@ services:
     plan: free
     rootDir: .
     autoDeploy: true
-    buildCommand: npm ci && ( [ "$ONCO_DB_PROVIDER" != "supabase" ] || npm run db:supabase:check -- --skip-dotenv ) && npm run build
+    buildCommand: npm ci && npm run build
     startCommand: npm run start
     healthCheckPath: /api/health
     envVars:
