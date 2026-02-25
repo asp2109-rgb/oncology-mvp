@@ -19,6 +19,10 @@ services:
         value: "true"
       - key: SUPABASE_BATCH_SIZE
         value: "500"
+      - key: SUPABASE_PROJECT_REF
+        value: qkcukpbqyjghroksxuvg
+      - key: NEXT_PUBLIC_SUPABASE_URL
+        value: https://qkcukpbqyjghroksxuvg.supabase.co
       - key: SUPABASE_URL
         sync: false
       - key: SUPABASE_SERVICE_ROLE_KEY

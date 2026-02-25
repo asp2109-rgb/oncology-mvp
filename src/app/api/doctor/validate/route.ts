@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { ZodError } from "zod";
+import { getDbProviderInfo } from "@/lib/db";
 import { caseInputSchema, doctorValidationRequestSchema } from "@/lib/types";
 import { validateCase, type ValidationOptions } from "@/lib/validation/rule-engine";
 import { buildDoctorLlmReview } from "@/lib/doctor-llm";
@@ -8,6 +9,19 @@ export const runtime = "nodejs";
 
 export async function POST(request: Request) {
   try {
+    const db = getDbProviderInfo();
+    if (db.requested === "supabase" && db.active !== "supabase") {
+      return NextResponse.json(
+        {
+          error: "Supabase не активен на сервере",
+          details:
+            "ONCO_DB_PROVIDER=supabase, но приложение работает в SQLite fallback. Укажите SUPABASE_URL/NEXT_PUBLIC_SUPABASE_URL (или SUPABASE_PROJECT_REF) и ключ Supabase в окружении Render.",
+          db,
+        },
+        { status: 503 },
+      );
+    }
+
     const payload = await request.json();
     const parsedRequest = doctorValidationRequestSchema.safeParse(payload);
 
