@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 import { ZodError } from "zod";
-import { getDbProviderInfo } from "@/lib/db";
 import { caseInputSchema, doctorValidationRequestSchema } from "@/lib/types";
 import { validateCase, type ValidationOptions } from "@/lib/validation/rule-engine";
 import { buildDoctorLlmReview } from "@/lib/doctor-llm";
@@ -9,12 +8,6 @@ export const runtime = "nodejs";
 
 export async function POST(request: Request) {
   try {
-    const db = getDbProviderInfo();
-    const dbFallbackWarning =
-      db.requested === "supabase" && db.active !== "supabase"
-        ? "Supabase не активен: валидация выполнена в SQLite fallback. Для прод-режима укажите SUPABASE_URL/SUPABASE_PROJECT_REF и ключ Supabase в Render."
-        : null;
-
     const payload = await request.json();
     const parsedRequest = doctorValidationRequestSchema.safeParse(payload);
 
@@ -39,16 +32,14 @@ export async function POST(request: Request) {
 
       return NextResponse.json({
         ...result,
-        warnings: dbFallbackWarning ? [dbFallbackWarning, ...result.warnings] : result.warnings,
         llm_review: llmReview,
       });
     } catch (error) {
       const details = error instanceof Error ? error.message : "Неизвестная ошибка LLM";
       if (details.includes("OPENAI_API_KEY")) {
-        const fallbackWarnings = dbFallbackWarning ? [dbFallbackWarning, ...result.warnings] : result.warnings;
         return NextResponse.json({
           ...result,
-          warnings: [...fallbackWarnings, "LLM недоступен, возвращен режим rules-only."],
+          warnings: [...result.warnings, "LLM недоступен, возвращен режим rules-only."],
           llm_review: null,
           llm_fallback: "rules_only",
         });
