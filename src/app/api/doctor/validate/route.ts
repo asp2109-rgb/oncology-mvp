@@ -10,17 +10,10 @@ export const runtime = "nodejs";
 export async function POST(request: Request) {
   try {
     const db = getDbProviderInfo();
-    if (db.requested === "supabase" && db.active !== "supabase") {
-      return NextResponse.json(
-        {
-          error: "Supabase не активен на сервере",
-          details:
-            "ONCO_DB_PROVIDER=supabase, но приложение работает в SQLite fallback. Проверьте env в Render: URL (SUPABASE_URL или NEXT_PUBLIC_SUPABASE_URL, либо SUPABASE_PROJECT_REF) и ключ (SUPABASE_SERVICE_ROLE_KEY / NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY / SUPABASE_KEY).",
-          db,
-        },
-        { status: 503 },
-      );
-    }
+    const dbFallbackWarning =
+      db.requested === "supabase" && db.active !== "supabase"
+        ? "Supabase не активен: валидация выполнена в SQLite fallback. Для прод-режима укажите SUPABASE_URL/SUPABASE_PROJECT_REF и ключ Supabase в Render."
+        : null;
 
     const payload = await request.json();
     const parsedRequest = doctorValidationRequestSchema.safeParse(payload);
@@ -46,16 +39,18 @@ export async function POST(request: Request) {
 
       return NextResponse.json({
         ...result,
+        warnings: dbFallbackWarning ? [dbFallbackWarning, ...result.warnings] : result.warnings,
         llm_review: llmReview,
       });
     } catch (error) {
       const details = error instanceof Error ? error.message : "Неизвестная ошибка LLM";
       if (details.includes("OPENAI_API_KEY")) {
+        const fallbackWarnings = dbFallbackWarning ? [dbFallbackWarning, ...result.warnings] : result.warnings;
         return NextResponse.json({
           ...result,
+          warnings: [...fallbackWarnings, "LLM недоступен, возвращен режим rules-only."],
           llm_review: null,
           llm_fallback: "rules_only",
-          warnings: [...result.warnings, "LLM недоступен, возвращен режим rules-only."],
         });
       }
 
